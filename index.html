@@ -4464,7 +4464,9 @@ function addOneBallEntry(entry) {
   const key = pairKey(home, away);
   const liveUrl = 'https://oneball.live/live/' + matchId + '.html';
   const signals = Array.isArray(entry.signals) ? entry.signals : [];
-  signals.map(oneBallSignalUrl).filter(Boolean).forEach(url => addOneTVSource(key, { url, type: 'm3u8', source: 'onetv', matchId, liveUrl, home, away }));
+  // Always use the stable OneBall match page. Direct signal URLs expire and must
+  // never be embedded in generated posts or passed to the Sports 803 player.
+  addOneTVSource(key, { url: liveUrl, type: 'one', source: 'onetv', matchId, liveUrl, home, away });
   if (!signals.length || !signals.some(signal => oneBallSignalUrl(signal))) {
     oneTVPendingMatches[key] = { matchId, liveUrl, home, away };
   }
@@ -4475,7 +4477,8 @@ async function fetchOneBallMatchPage(match) {
   const html = await fetchOneBallPage(match.liveUrl, 10000);
   const streamUrl = extractOneBallStream(html, match.liveUrl);
   if (streamUrl) {
-    addOneTVSource(match.key, { url: streamUrl, type: 'm3u8', source: 'onetv', matchId: match.matchId, liveUrl: match.liveUrl, home: match.home, away: match.away });
+    // Keep the canonical live page as the source; only persist the discovered
+    // signal for diagnostics/cache metadata, never as the generated link.
     delete oneTVPendingMatches[match.key];
     persistOneBallLookup(match.matchId, { liveUrl: match.liveUrl, home: match.home, away: match.away, streamUrl });
   }
