@@ -1993,7 +1993,7 @@ button:disabled { opacity: .4; cursor: not-allowed; transform: none !important; 
       </div>
       <div class="settings-grid" style="margin-bottom:12px">
         <div class="form-group"><label>Event Firebase Database URL</label><input type="text" id="cfg-firebase-url" placeholder="https://sports-803-1b806-default-rtdb.firebaseio.com"></div>
-        <div class="form-group"><label>Event paths</label><input type="text" id="cfg-firebase-events-path" placeholder="s803config/todaysMatches"><input type="text" id="cfg-firebase-channels-path" placeholder="livetv/channels" style="margin-top:6px"></div>
+        <div class="form-group"><label>Event paths</label><input type="text" id="cfg-firebase-events-path" placeholder="s803config/todaysMatches"><input type="text" id="cfg-firebase-channels-path" placeholder="livetv/channels" style="margin-top:6px"><label style="display:block;margin-top:6px">Post log path</label><input type="text" id="cfg-firebase-post-log-path" placeholder="s803config/postLog"></div>
       </div>
       <div class="settings-grid" style="margin-bottom:12px">
         <div class="form-group"><label>August PPV Scraper API <span style="color:var(--blue);font-weight:400">(PPVTV)</span></label><input type="text" id="cfg-ppvtv-api" placeholder="https://august.ppvtv.icu/api/matches.json"></div>
@@ -2046,7 +2046,7 @@ button:disabled { opacity: .4; cursor: not-allowed; transform: none !important; 
       <div class="card-title">Data Management</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
 <div id="post-log-diagnostics" class="card" style="margin-top:12px"><div class="card-title">Post Log Diagnostics</div><div id="post-log-diagnostics-body" style="font-size:.75rem;color:var(--muted2)">Loading…</div><button class="btn-ghost btn-sm" onclick="repairPostLog()" style="margin-top:8px">Repair log</button></div>
-        <button class="btn-blue btn-sm" onclick="syncPostLogFromBlogger()">↻ Sync from Blogger</button> <button class="btn-ghost btn-sm" onclick="exportCFG()">📤 Export Config</button>
+        <button class="btn-blue btn-sm" onclick="syncPostLogFromBlogger()">↻ Sync from Blogger</button> <button class="btn-blue btn-sm" onclick="syncPostLogFromCloud()">☁ Sync Post Log from Cloud</button> <button class="btn-ghost btn-sm" onclick="pushPostLogToCloud()">☁ Push Post Log to Cloud</button> <button class="btn-ghost btn-sm" onclick="exportCFG()">📤 Export Config</button>
         <button class="btn-ghost btn-sm" onclick="importCFG()">📥 Import Config</button>
         <button class="btn-sm" style="background:#3d0c0c;color:#fff" onclick="clearAll()">🗑 Clear All</button>
       </div>
@@ -2188,6 +2188,8 @@ const LEGACY_EVENT_CLIENT_ID = '55046129292-15h9k5ga0lr1e3p3ptqg1iueeks49f7v.app
 const EVENT_FIREBASE_DATABASE_URL = 'https://sports-803-1b806-default-rtdb.firebaseio.com';
 const EVENT_FIREBASE_EVENTS_PATH = 's803config/todaysMatches';
 const EVENT_FIREBASE_CHANNELS_PATH = 'livetv/channels';
+const EVENT_FIREBASE_POST_LOG_PATH = 's803config/postLog';
+const EVENT_FIREBASE_ONEBALL_PATH = 's803config/oneball';
 
 // ----- STATE -----
 let CFG = {
@@ -2200,6 +2202,7 @@ let CFG = {
   firebaseDatabaseUrl: EVENT_FIREBASE_DATABASE_URL,
   firebaseEventsPath: EVENT_FIREBASE_EVENTS_PATH,
   firebaseChannelsPath: EVENT_FIREBASE_CHANNELS_PATH,
+  firebasePostLogPath: EVENT_FIREBASE_POST_LOG_PATH,
   autoFetchStreams: false, enableDdkanqu: false, enableOneTV: false, enablePPVTV: true, embedStreamsInPost: true,
   ddkanquMappingsRaw: '',
   deepseekKey: '', deepseekModel: 'claude-sonnet-4-20250514', deepseekTone: '', deepseekLength: 'medium',
@@ -2226,7 +2229,48 @@ function v(id) { const el = document.getElementById(id); return el ? el.value.tr
 function set(id, val) { const el = document.getElementById(id); if (el) el.value = val || ''; }
 function evKey(ev) { const dt = ev?.startTime ? new Date(ev.startTime).toISOString().slice(0,10) : (ev?.date || 'undated'); return [ev?.type || 'match', ev?.id || 'no-id', ev?.league?.id || '', dt, (ev?.home?.name || ev?.name || '').trim(), (ev?.away?.name || '').trim()].join('|'); }
 function getLog(ev) { return postLog[evKey(ev)] || null; }
-function setLog(ev, data) { postLog[evKey(ev)] = { ...(postLog[evKey(ev)] || {}), ...data, ts: Date.now() }; saveAll(); updateStats(); }
+function firebaseRoot() { return (CFG.firebaseDatabaseUrl || EVENT_FIREBASE_DATABASE_URL).replace(/\/$/, ''); }
+function firebasePath(path) { return String(path || '').replace(/^\/+|\/+$/g, ''); }
+function firebaseUrl(path) { return firebaseRoot() + '/' + firebasePath(path).split('/').map(encodeURIComponent).join('/') + '.json'; }
+function mergeCloudEntry(key, cloudEntry) {
+  if (!cloudEntry || typeof cloudEntry !== 'object') return;
+  const local = postLog[key];
+  if (!local || Number(cloudEntry.ts || 0) > Number(local.ts || 0)) postLog[key] = { ...local, ...cloudEntry };
+}
+async function cloudPut(path, value) {
+  try { const r = await fetch(firebaseUrl(path), { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(value) }); if (!r.ok) throw new Error('HTTP ' + r.status); return true; }
+  catch (e) { console.warn('[Firebase write]', e.message); return false; }
+}
+async function cloudGet(path) {
+  try { const r = await fetch(firebaseUrl(path)); if (!r.ok) throw new Error('HTTP ' + r.status); return await r.json(); }
+  catch (e) { console.warn('[Firebase read]', e.message); return null; }
+}
+function queuePostLogCloudWrite(key, entry) {
+  if (!CFG.firebaseDatabaseUrl || !CFG.firebasePostLogPath) return;
+  cloudPut(firebasePath(CFG.firebasePostLogPath) + '/' + key, entry);
+}
+async function syncPostLogFromCloud(showToast = true) {
+  const data = await cloudGet(CFG.firebasePostLogPath || EVENT_FIREBASE_POST_LOG_PATH);
+  if (!data || typeof data !== 'object') { if (showToast) toast('Cloud post log unavailable; local log retained', 'w'); return 0; }
+  let merged = 0;
+  Object.entries(data).forEach(([key, entry]) => { const before = postLog[key]?.ts || 0; mergeCloudEntry(key, entry); if ((postLog[key]?.ts || 0) !== before) merged++; });
+  saveAll(); updateStats(); window.renderPostLog?.(); window.renderPostLogDiagnostics?.();
+  if (showToast) toast('Cloud post log synced: ' + merged + ' entries ✓', 's');
+  return merged;
+}
+async function pushPostLogToCloud() {
+  const entries = Object.entries(postLog).filter(([key]) => key && !key.startsWith('__') && postLog[key] && typeof postLog[key] === 'object');
+  let pushed = 0;
+  for (const [key, entry] of entries) if (await cloudPut(firebasePath(CFG.firebasePostLogPath || EVENT_FIREBASE_POST_LOG_PATH) + '/' + key, entry)) pushed++;
+  toast('Cloud post log push complete: ' + pushed + '/' + entries.length + ' entries ✓', 's');
+}
+async function persistOneBallLookup(matchId, data = {}) {
+  const id = String(matchId || '').replace(/\.html?$/i, '');
+  if (!/^\d+$/.test(id)) return;
+  await cloudPut(firebasePath(EVENT_FIREBASE_ONEBALL_PATH) + '/' + id, { ...data, ts: Date.now() });
+}
+async function getOneBallLookup(matchId) { const id = String(matchId || '').replace(/\.html?$/i, ''); return /^\d+$/.test(id) ? await cloudGet(firebasePath(EVENT_FIREBASE_ONEBALL_PATH) + '/' + id) : null; }
+function setLog(ev, data) { const key=evKey(ev); postLog[key] = { ...(postLog[key] || {}), ...data, ts: Date.now() }; saveAll(); updateStats(); queuePostLogCloudWrite(key, postLog[key]); }
 function findEv(sid) { const id = decodeURIComponent(String(sid)); return allEvents.find(e => String(e.id) === id) || allEvents.find(e => String(e.id) === String(sid)) || null; }
 function pick(a) { return a[Math.floor(Math.random() * a.length)]; }
 
@@ -2278,11 +2322,12 @@ function loadAll() {
   CFG.firebaseDatabaseUrl = CFG.firebaseDatabaseUrl || EVENT_FIREBASE_DATABASE_URL;
   CFG.firebaseEventsPath = CFG.firebaseEventsPath || EVENT_FIREBASE_EVENTS_PATH;
   CFG.firebaseChannelsPath = CFG.firebaseChannelsPath || EVENT_FIREBASE_CHANNELS_PATH;
+  CFG.firebasePostLogPath = CFG.firebasePostLogPath || EVENT_FIREBASE_POST_LOG_PATH;
   applyConfigToUI();
 }
 
 function persistCFG({ silent = false } = {}) {
-  CFG.blogId = v('cfg-blogid'); CFG.clientId = v('cfg-clientid') || EVENT_BUILTIN_CLIENT_ID; CFG.imgbbKey = v('cfg-imgbb'); CFG.ytApiKey = v('cfg-yt-key'); CFG.playerBase = v('cfg-player') || 'https://sports803.github.io/player/'; CFG.schedTiming = parseInt(document.getElementById('sched-timing')?.value || 60); CFG.schedStatus = document.getElementById('sched-def-status')?.value || 'DRAFT'; CFG.schedInterval = parseInt(document.getElementById('sched-interval')?.value || 300000); CFG.schedThumbs = document.getElementById('sched-thumbs')?.checked || false; CFG.mediaPlayerBase = v('cfg-media-player-base') || 'https://sports803.github.io/player/'; CFG.ppvtvMatchesApi = v('cfg-ppvtv-api') || CFG.ppvtvMatchesApi; CFG.firebaseDatabaseUrl = v('cfg-firebase-url') || EVENT_FIREBASE_DATABASE_URL; CFG.firebaseEventsPath = v('cfg-firebase-events-path') || EVENT_FIREBASE_EVENTS_PATH; CFG.firebaseChannelsPath = v('cfg-firebase-channels-path') || EVENT_FIREBASE_CHANNELS_PATH; CFG.autoFetchStreams = !!document.getElementById('cfg-auto-fetch-streams')?.checked; CFG.enableDdkanqu = !!document.getElementById('cfg-enable-ddkanqu')?.checked; CFG.enableOneTV = !!document.getElementById('cfg-enable-onetv')?.checked; CFG.enablePPVTV = document.getElementById('cfg-enable-ppvtv')?.checked ?? true; CFG.embedStreamsInPost = document.getElementById('cfg-embed-streams-in-post')?.checked ?? true; CFG.ddkanquMappingsRaw = v('cfg-ddkanqu-mappings'); CFG.deepseekKey = v('cfg-deepseek-key'); CFG.deepseekModel = document.getElementById('cfg-deepseek-model')?.value || CFG.deepseekModel; CFG.deepseekTone = v('cfg-deepseek-tone'); CFG.deepseekLength = document.getElementById('cfg-deepseek-length')?.value || CFG.deepseekLength; ddkanquMappings = parseDDKMappings(CFG.ddkanquMappingsRaw); saveAll(); updateClaudeStatus(); if (!silent) toast('Settings saved ✓', 's');
+  CFG.blogId = v('cfg-blogid'); CFG.clientId = v('cfg-clientid') || EVENT_BUILTIN_CLIENT_ID; CFG.imgbbKey = v('cfg-imgbb'); CFG.ytApiKey = v('cfg-yt-key'); CFG.playerBase = v('cfg-player') || 'https://sports803.github.io/player/'; CFG.schedTiming = parseInt(document.getElementById('sched-timing')?.value || 60); CFG.schedStatus = document.getElementById('sched-def-status')?.value || 'DRAFT'; CFG.schedInterval = parseInt(document.getElementById('sched-interval')?.value || 300000); CFG.schedThumbs = document.getElementById('sched-thumbs')?.checked || false; CFG.mediaPlayerBase = v('cfg-media-player-base') || 'https://sports803.github.io/player/'; CFG.ppvtvMatchesApi = v('cfg-ppvtv-api') || CFG.ppvtvMatchesApi; CFG.firebaseDatabaseUrl = v('cfg-firebase-url') || EVENT_FIREBASE_DATABASE_URL; CFG.firebaseEventsPath = v('cfg-firebase-events-path') || EVENT_FIREBASE_EVENTS_PATH; CFG.firebaseChannelsPath = v('cfg-firebase-channels-path') || EVENT_FIREBASE_CHANNELS_PATH; CFG.firebasePostLogPath = v('cfg-firebase-post-log-path') || EVENT_FIREBASE_POST_LOG_PATH; CFG.autoFetchStreams = !!document.getElementById('cfg-auto-fetch-streams')?.checked; CFG.enableDdkanqu = !!document.getElementById('cfg-enable-ddkanqu')?.checked; CFG.enableOneTV = !!document.getElementById('cfg-enable-onetv')?.checked; CFG.enablePPVTV = document.getElementById('cfg-enable-ppvtv')?.checked ?? true; CFG.embedStreamsInPost = document.getElementById('cfg-embed-streams-in-post')?.checked ?? true; CFG.ddkanquMappingsRaw = v('cfg-ddkanqu-mappings'); CFG.deepseekKey = v('cfg-deepseek-key'); CFG.deepseekModel = document.getElementById('cfg-deepseek-model')?.value || CFG.deepseekModel; CFG.deepseekTone = v('cfg-deepseek-tone'); CFG.deepseekLength = document.getElementById('cfg-deepseek-length')?.value || CFG.deepseekLength; ddkanquMappings = parseDDKMappings(CFG.ddkanquMappingsRaw); saveAll(); updateClaudeStatus(); if (!silent) toast('Settings saved ✓', 's');
 }
 
 function saveCFG() {
@@ -2300,6 +2345,7 @@ function saveCFG() {
   CFG.firebaseDatabaseUrl = v('cfg-firebase-url') || EVENT_FIREBASE_DATABASE_URL;
   CFG.firebaseEventsPath = v('cfg-firebase-events-path') || EVENT_FIREBASE_EVENTS_PATH;
   CFG.firebaseChannelsPath = v('cfg-firebase-channels-path') || EVENT_FIREBASE_CHANNELS_PATH;
+  CFG.firebasePostLogPath = v('cfg-firebase-post-log-path') || EVENT_FIREBASE_POST_LOG_PATH;
   CFG.autoFetchStreams = document.getElementById('cfg-auto-fetch-streams')?.checked || false;
   CFG.enableDdkanqu = document.getElementById('cfg-enable-ddkanqu')?.checked || false;
   CFG.enableOneTV = document.getElementById('cfg-enable-onetv')?.checked || false;
@@ -2868,6 +2914,7 @@ async function fetchBloggerInfo() {
     saveAll();
     updateAuthUI(true);
     toast(bloggerBlogs.length + ' Blogger blog(s) loaded ✓', 's');
+    if (CFG.blogId && window.syncPostLogFromBlogger) window.syncPostLogFromBlogger(true);
   } catch (e) {
     console.warn('[Blogger auth]', e.message);
     toast('Could not load Blogger blogs: ' + e.message, 'e');
@@ -3870,14 +3917,19 @@ async function bulkPostHighlights() {
   for (const ev of candidates) {
     try {
       let pl=getLog(ev);
-      const found=pl?.hlUrl ? {playerUrl:pl.hlUrl,replayUrl:pl.replayUrl} : await searchOneBallHighlights(ev);
-      if (!found?.playerUrl) { failed++; continue; }
+      const cachedLookup=pl?.oneMatchId ? await getOneBallLookup(pl.oneMatchId) : null;
+      const found=cachedLookup?.replayUrl ? {matchId:pl.oneMatchId,replayUrl:cachedLookup.replayUrl,playerUrl:oneBallPlayerUrl(pl.oneMatchId,'replay')} : await searchOneBallHighlights(ev);
+      const oneMatchId=found?.matchId||pl?.oneMatchId||extractReplayId(found?.replayUrl||pl?.replayUrl||'');
+      if (!oneMatchId) { failed++; continue; }
+      const replayUrl=oneBallUrlFor(oneMatchId,'replay');
+      const playerUrl=oneBallPlayerUrl(oneMatchId,'replay');
+      if (!found?.playerUrl && !playerUrl) { failed++; continue; }
       const title=ev.home.name+' vs '+ev.away.name+' – Highlights & Replay | Sports 803';
       const body=await buildArticleWithClaude(title,ev,true);
-      const html=body+'\n\n'+buildHighlightsPlayerIframe(found.playerUrl);
-      const post=await postRaw(title,html,CFG.schedStatus||'DRAFT',getLabels(ev));
+      const html=body+'\n\n'+buildHighlightsPlayerIframe(playerUrl);
+      const post=pl?.postId ? await updateExistingPost(ev,title,html,CFG.schedStatus||'DRAFT',getLabels(ev)) : await postRaw(title,html,CFG.schedStatus||'DRAFT',getLabels(ev));
       if (!post) { failed++; if(failed>=3){toast('Bulk highlights stopped after 3 failures','e');break;} continue; }
-      setLog(ev,{postId:post.id,postUrl:post.url,title,hasHL:true,hlUrl:found.playerUrl,replayUrl:found.replayUrl||'',status:CFG.schedStatus||'DRAFT'});
+      setLog(ev,{postId:post.id,postUrl:post.url,title,hasHL:true,hlUrl:playerUrl,replayUrl,status:CFG.schedStatus||'DRAFT',oneMatchId});
       posted++; toast('Bulk highlights: '+posted+'/'+candidates.length,'i'); await new Promise(r=>setTimeout(r,1500));
     } catch(e) { failed++; console.warn('[bulk highlights]',e); if(failed>=3) break; }
   }
@@ -4153,10 +4205,12 @@ async function getAllStreamSourcesForEvent(ev) {
 function buildSports803PlayerUrl(sources) {
   if (!sources || !sources.length) return '';
   const base = (CFG.mediaPlayerBase || 'https://sports803.github.io/player/').replace(/\/$/, '');
+  const one = sources.find(s => s.type === 'one');
   const mora = sources.find(s => s.type === 'mora' || s.type === 'hls');
   const embeds = sources.filter(s => s.type === 'embed');
   const params = [];
-  if (mora?.url) params.push('mora=' + encodeURIComponent(mora.url));
+  if (one?.url) params.push('one=' + one.url);
+  else if (mora?.url) params.push('mora=' + encodeURIComponent(mora.url));
   embeds.forEach(s => { if (s.url) params.push('embed=' + encodeURIComponent(s.url)); });
   return params.length ? base + '/?' + params.join('&') : '';
 }
@@ -4246,11 +4300,11 @@ async function loadOneTVStreams() {
       oneTVHomeMap = {};
       cards.forEach(card => {
         const href = card.getAttribute('href') || '';
-        const matchId = card.getAttribute('data-match-id') || (href.match(/\/live\/(\d+)\.html$/) || href.match(/\/(\d+)\.html$/) || [])[1];
-        if (!matchId || !href) return;
         let eventUrl;
         try { eventUrl = new URL(href, url).href; } catch (e) { return; }
         if (!/^https:\/\/oneball\.live\/live\/\d+\.html$/i.test(eventUrl)) return;
+        const matchId = eventUrl.match(/\/live\/(\d+)\.html$/i)?.[1] || '';
+        if (!matchId) return;
         const homeEl = card.querySelector('.team-home,[data-side="home"],[data-team="home"],.home-team');
         const awayEl = card.querySelector('.team-away,[data-side="away"],[data-team="away"],.away-team');
         const readName = el => (el?.querySelector('.team-name,[data-team-name],.name')?.textContent || el?.getAttribute('data-team-name') || el?.textContent || '').trim();
@@ -4258,7 +4312,8 @@ async function loadOneTVStreams() {
         if (!home || !away) return;
         const key = pairKey(home, away);
         if (!oneTVHomeMap[key]) oneTVHomeMap[key] = [];
-        if (!oneTVHomeMap[key].some(s => s.url === eventUrl)) oneTVHomeMap[key].push({ url: eventUrl, type: 'embed', source: 'onetv', matchId, eventUrl, home, away });
+        if (!oneTVHomeMap[key].some(s => s.url === eventUrl)) oneTVHomeMap[key].push({ url: eventUrl, type: 'one', source: 'onetv', matchId, liveUrl: eventUrl, home, away });
+        persistOneBallLookup(matchId, { liveUrl: eventUrl, home, away });
       });
       const count = Object.keys(oneTVHomeMap).length;
       console.log('[OneTV] Loaded ' + count + ' match(es)');
@@ -4388,6 +4443,26 @@ async function testDDKanquLookup() {
 // ============================================================
 //  HIGHLIGHTS PLAYER
 // ============================================================
+function canonicalOneBallLiveUrl(url) {
+  let raw = String(url || '').trim();
+  try {
+    const parsed = new URL(raw, 'https://oneball.live');
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    const id = (parts.pop() || '').replace(/\.html?$/i, '');
+    if (/^\d+$/.test(id)) return 'https://oneball.live/live/' + id + '.html';
+    raw = parsed.href;
+  } catch (e) {}
+  return raw.replace(/\/\/+/g, '/').replace('https:/', 'https://');
+}
+function oneBallUrlFor(matchId, kind = 'live') {
+  const id = String(matchId || '').replace(/\.html?$/i, '');
+  if (!/^\d+$/.test(id)) return '';
+  return 'https://oneball.live/' + (kind === 'replay' ? 'replay' : 'live') + '/' + id + '.html';
+}
+function oneBallPlayerUrl(matchId, kind = 'live') {
+  const page = /^https?:\/\//i.test(String(matchId || '')) ? String(matchId).split('?')[0] : oneBallUrlFor(matchId, kind);
+  return page ? playerBaseUrl() + '?one=' + page : '';
+}
 function canonicalOneBallReplayUrl(url) {
   let raw = String(url || '').trim();
   try {
@@ -4397,7 +4472,7 @@ function canonicalOneBallReplayUrl(url) {
     if (/^\d+$/.test(id)) return 'https://oneball.live/replay/' + id + '.html';
     raw = parsed.href;
   } catch (e) {}
-  return raw.replace('https://oneball.live//', 'https://oneball.live/');
+  return raw.replace(/\/\/+/, '/').replace('https:/', 'https://');
 }
 function playerBaseUrl() { return (CFG.playerBase || 'https://sports803.github.io/player/').replace(/\/?$/, '/') ; }
 function buildHighlightsPlayerIframe(url) {
@@ -4405,7 +4480,7 @@ function buildHighlightsPlayerIframe(url) {
   const replay = canonicalOneBallReplayUrl(url);
   const playerBase = playerBaseUrl();
   let src = replay;
-  if (!replay.includes('?mora=') && !replay.includes('&mora=') && !replay.includes('?one=') && !replay.includes('&one=')) src = playerBase + '?one=' + replay;
+  if (!replay.includes('?one=') && !replay.includes('&one=') && !replay.includes('?mora=') && !replay.includes('&mora=')) src = oneBallPlayerUrl(replay);
   return '<div style="margin:18px 0;position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:10px"><iframe loading="lazy" src="' + src + '" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;border-radius:10px" allowfullscreen allow="autoplay; encrypted-media"></iframe></div>';
 }
 
@@ -4474,8 +4549,9 @@ async function searchOneBallHighlights(ev) {
   const links=[...doc.querySelectorAll('a[href]')]; for(const a of links){if(oneBallMatchFound(a.textContent+' '+a.getAttribute('href'),home,away)){try{matchUrl=new URL(a.getAttribute('href'), 'https://oneball.live').href}catch(e){} if(matchUrl)break;}}
   if(!matchUrl){const md=listHtml.match(/\[([^\]]+)\]\((https?:\/\/[^\s)]+\/replay\/[^\s)]+)\)/gi)||[];for(const x of md){const q=x.match(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/i);if(q&&oneBallMatchFound(q[1],home,away)){matchUrl=q[2];break}}}
   if(!matchUrl){toast('No matching replay found on OneBall for '+home+' vs '+away,'w');return null;}
-  const canonical=canonicalOneBallReplayUrl(matchUrl.split('?')[0]); const playerUrl=playerBaseUrl()+'?one='+canonical;
-  const result={url:playerUrl,playerUrl,replayUrl:canonical,title:home+' vs '+away+' Highlights'};
+  const canonical=canonicalOneBallReplayUrl(matchUrl.split('?')[0]); const matchId=extractReplayId(canonical); const playerUrl=oneBallPlayerUrl(matchId, 'replay');
+  const result={url:playerUrl,playerUrl,replayUrl:canonical,replayPageUrl:canonical,matchId,title:home+' vs '+away+' Highlights'};
+  persistOneBallLookup(matchId, { replayUrl: canonical, home, away });
   setLog(ev,{hasHL:true,hlUrl:playerUrl,replayUrl:canonical,oneMatchId:extractReplayId(canonical),hlCanonical:canonical,hlFetchedAt:Date.now()});
   return result;
 }
@@ -4617,10 +4693,10 @@ async function scrapeFullRacesURL(url, silent = false) {
 
 function buildRacePlayerIframe(race) {
   if (!race || !race.sources || !race.sources.length) return '';
-  const playerBase = (CFG.mediaPlayerBase || CFG.playerBase || 'https://sports803.github.io/player/').replace(/\/$/, '');
+  const playerBase = (CFG.mediaPlayerBase || CFG.playerBase || 'https://sports803.github.io/player/').replace(/\/?$/, '/');
   const params = race.sources.map(s => {
-    const type = (s.url.includes('ddkaqiu.com') || s.url.includes('www.ddkqax.com')) ? 'mora' : 'embed';
-    return type + '=' + encodeURIComponent(s.url);
+    const type = s.type === 'one' ? 'one' : ((s.url.includes('ddkaqiu.com') || s.url.includes('www.ddkqax.com')) ? 'mora' : 'embed');
+    return type === 'one' ? 'one=' + s.url : type + '=' + encodeURIComponent(s.url);
   }).join('&');
   const src = playerBase + '?' + params;
   return '<div style="margin:18px 0;position:relative;padding-bottom:56.25%;height:0;overflow:hidden"><iframe loading="lazy" sandbox="allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-top-navigation" allow="encrypted-media" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0" src="' + src + '" frameborder="0" scrolling="no" allowfullscreen width="100%" height="500"></iframe></div>';
@@ -5549,6 +5625,7 @@ function applyConfigToUI() {
   set('cfg-firebase-url', CFG.firebaseDatabaseUrl || EVENT_FIREBASE_DATABASE_URL);
   set('cfg-firebase-events-path', CFG.firebaseEventsPath || EVENT_FIREBASE_EVENTS_PATH);
   set('cfg-firebase-channels-path', CFG.firebaseChannelsPath || EVENT_FIREBASE_CHANNELS_PATH);
+  set('cfg-firebase-post-log-path', CFG.firebasePostLogPath || EVENT_FIREBASE_POST_LOG_PATH);
   set('cfg-ddkanqu-mappings', CFG.ddkanquMappingsRaw || '');
   if (document.getElementById('cfg-auto-fetch-streams')) document.getElementById('cfg-auto-fetch-streams').checked = CFG.autoFetchStreams || false;
   if (document.getElementById('cfg-enable-ddkanqu')) document.getElementById('cfg-enable-ddkanqu').checked = CFG.enableDdkanqu || false;
@@ -5623,7 +5700,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function validatePostIdUniqueness(id,key) { if(!id) return; logEntries().forEach(([k,v])=>{if(k!==key && String(v.postId)===String(id)){ console.warn('[PostLog] duplicate postId',id,k,key); postLog[k]={...v,duplicateOf:key}; postLog[key]={...(postLog[key]||{}),duplicateOf:k}; }}); }
   function saveV10() { prunePostLog(); clearTimeout(saveTimer); saveTimer=setTimeout(()=>{try{localStorage.setItem(SK_POST,JSON.stringify({schema:2,data:postLog,ts:Date.now()}));}catch(e){console.warn('Post log save error',e);}},300); }
   window.canonTeam=canonTeam; window.evKey=evKey; window.getLog=ev=>postLog[evKey(ev)]||null;
-  window.setLog=function(ev,data){const key=evKey(ev); if(data.postId) validatePostIdUniqueness(data.postId,key); postLog[key]={...(postLog[key]||{}),...data,ts:Date.now()}; saveAll(); saveV10(); updateStats(); renderPostLogDiagnostics();};
+  window.setLog=function(ev,data){const key=evKey(ev); if(data.postId) validatePostIdUniqueness(data.postId,key); postLog[key]={...(postLog[key]||{}),...data,ts:Date.now()}; saveAll(); saveV10(); updateStats(); window.renderPostLogDiagnostics?.(); queuePostLogCloudWrite(key,postLog[key]);};
   window.extractReplayId=function(url){const m=String(url||'').match(/\/replay\/([^/?#]+?)(?:\.html)?(?:[?#]|$)/i);return m?m[1]:null;};
   window.extractPostIdFromUrl=function(url){const x=String(url||'').trim(),m1=x.match(/blogger\.com\/blog\/post\/edit\/\d+\/(\d{10,})/i),m2=x.match(/\/posts\/(\d{10,})/i),m3=x.match(/^(\d{10,})$/);return m1?.[1]||m2?.[1]||m3?.[1]||null;};
   window.resolvePostUrlToId=async function(url){const direct=extractPostIdFromUrl(url);if(direct)return direct;let u;try{u=new URL(String(url).trim())}catch(e){return null}const path=decodeURIComponent(u.pathname||'');if(!/^\/\d{4}\/\d{2}\/.+\.html$/i.test(path))return null;const key=(u.origin+path).toLowerCase();const cache=postLog.__urlCache||{};if(cache[key])return cache[key];if(!accessToken||!CFG.blogId)return null;try{const r=await fetch('https://www.googleapis.com/blogger/v3/blogs/'+CFG.blogId+'/posts/bypath?path='+encodeURIComponent(path),{headers:{Authorization:'Bearer '+accessToken}});if(!r.ok)return null;const d=await r.json();if(!d.id)return null;postLog.__urlCache={...cache,[key]:d.id};saveV10();return d.id}catch(e){console.warn('[resolvePostUrlToId]',e.message);return null}};
@@ -5636,7 +5713,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.updateExistingPost=async function(ev,title,html,status,labels,publishDate=null){const pl=ev?getLog(ev):null,id=editingPostId||pl?.postId;if(!id){toast('No post ID to update','e');return null}const body={kind:'blogger#post',id,blog:{id:CFG.blogId},title,content:html,labels:labels||[],searchDescription:(ensureSearchDescription(title,html)||makeSearchDescription(title,html)).slice(0,150),...(publishDate&&status==='LIVE'?{published:publishDate}:{})};let r,last;for(let attempt=0;attempt<4;attempt++){try{r=await fetch('https://www.googleapis.com/blogger/v3/blogs/'+CFG.blogId+'/posts/'+id,{method:'PUT',headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},body:JSON.stringify(body)});if(r.ok){const p=await r.json();if(ev)setLog(ev,{postId:p.id,postUrl:p.url,status,title,league:ev.league?.name});toast('Post updated ✓','s');return p}last=r.status;if(![429,500,502,503,504].includes(r.status))break;await new Promise(x=>setTimeout(x,1000*Math.pow(2,attempt)));}catch(e){last=e.message;await new Promise(x=>setTimeout(x,1000*Math.pow(2,attempt)));}}toast('Update failed after retries: Blogger '+last,'e');return null;};
   // Preserve the v9 search implementation under a private alias, then add canonical persistence.
   const originalSearch=searchOneBallHighlights;
-  window.searchOneBallHighlights=async function(ev){const r=await originalSearch(ev);if(r){const replayUrl=r.replayUrl||r.replayPageUrl||'';setLog(ev,{hasHL:true,hlUrl:r.playerUrl,replayUrl,oneMatchId:extractReplayId(replayUrl),hlCanonical:replayUrl.split('?')[0],hlFetchedAt:Date.now()});}return r;};
+  window.searchOneBallHighlights=async function(ev){const r=await originalSearch(ev);if(r){const replayUrl=r.replayUrl||r.replayPageUrl||'',oneMatchId=r.matchId||extractReplayId(replayUrl);setLog(ev,{hasHL:true,hlUrl:oneBallPlayerUrl(oneMatchId,'replay'),replayUrl,oneMatchId,hlCanonical:replayUrl.split('?')[0],hlFetchedAt:Date.now()});}return r;};
   window.oneBallSearchAndFill=async function(sid){const ev=sid?findEv(sid):currentComposeEv,r=await searchOneBallHighlights(ev);if(!r)return;set('highlights-video-url',r.playerUrl);set('hl-video',r.playerUrl);const b=document.getElementById('post-body');b.value=stripInjectedBlocks(b.value);b.value+=(b.value?'\n\n':'')+buildHighlightsPlayerIframe(r.playerUrl);updateSEO();toast('✓ OneBall Replay found!','s');};
   window.oneBallSearchForModal=async function(){const i=parseInt(v('hl-select')),ev=allEvents[i];if(!ev){toast('Select an event first','w');return}const r=await searchOneBallHighlights(ev);if(r){set('hl-video',r.playerUrl);onHLSelect();toast('✓ OneBall Replay found','s');}};
   window.unmarkHighlights=function(){const ev=allEvents[parseInt(v('hl-select'))];if(ev){setLog(ev,{hasHL:false,hlUrl:null,replayUrl:null,oneMatchId:null});onHLSelect();toast('Highlights unmarked','s');}};
@@ -5648,12 +5725,15 @@ window.buildRichHighlightSections=function(ev){const h=ev.home?.name||'Home',a=e
   // Storage migration runs after the original loader has restored config and caches.
   oldLoadAll();
   const raw=localStorage.getItem(SK_POST);try{const j=JSON.parse(raw||'{}');postLog=migratePostLog(j.data||j);if(!j.schema||j.schema!==2)saveV10();}catch(e){postLog={};}prunePostLog();
+  syncPostLogFromCloud(false);
   window.renderPostLog=function(){const tb=document.getElementById('log-tbody');if(!tb)return;const es=logEntries().map(x=>x[1]).sort((a,b)=>(b.ts||0)-(a.ts||0));tb.innerHTML=es.length?es.map(p=>'<tr><td>'+ (p.title||'—')+'</td><td><button class="btn-ghost btn-xs" onclick="navigator.clipboard.writeText(\''+(p.postId||'')+'\')">'+(p.postId||'—')+'</button></td><td>'+(p.league||'—')+'</td><td>'+(p.thumb?'🖼️ Yes':'—')+'</td><td>'+(p.status||'draft')+'</td><td>'+(p.hasHL?'✓':'—')+'</td><td>'+(p.ts?new Date(p.ts).toLocaleString():'—')+'</td><td>'+(p.postUrl?'<a href="'+p.postUrl+'" target="_blank">View</a>':'—')+'</td></tr>').join(''):'<tr><td colspan="8">No posts yet.</td></tr>';};
-  window.syncPostLogFromBlogger=async function(){if(!accessToken||!CFG.blogId){toast('Sign in and set Blog ID first','w');return}try{let pageToken='',items=[];do{const q='https://www.googleapis.com/blogger/v3/blogs/'+CFG.blogId+'/posts?maxResults=500&fetchBodies=false'+(pageToken?'&pageToken='+encodeURIComponent(pageToken):'');const r=await fetch(q,{headers:{Authorization:'Bearer '+accessToken}});if(!r.ok)throw Error('HTTP '+r.status);const d=await r.json();items.push(...(d.items||[]));pageToken=d.nextPageToken||'';}while(pageToken);let synced=0;items.forEach(p=>{const labels=p.labels||[];const markers=labels.filter(x=>x.indexOf('s803:')===0);if(!markers.length){const title=String(p.title||'').toLowerCase();const match=allEvents.find(ev=>{const a=(ev.home?.name||ev.name||'').toLowerCase(),b=(ev.away?.name||'').toLowerCase();return a&&title.includes(a)&&(b?title.includes(b):true)});if(match)markers.push('s803:'+evKey(match));}markers.forEach(marker=>{const k=marker.slice(5);if(!k||k==='hl')return;postLog[k]={...(postLog[k]||{}),postId:p.id,postUrl:p.url,title:p.title,status:p.status,searchDescription:p.searchDescription||postLog[k]?.searchDescription||'',bloggerSyncedAt:Date.now(),ts:postLog[k]?.ts||Date.now()};synced++;});});saveV10();renderPostLog();renderPostLogDiagnostics();updateStats();toast('Synced '+synced+' Sports 803 post IDs/URLs from Blogger ✓','s')}catch(e){toast('Blogger sync failed: '+e.message,'e')}};
+  window.syncPostLogFromBlogger=async function(silent=false){if(!accessToken||!CFG.blogId){if(!silent)toast('Sign in and set Blog ID first','w');return}try{let pageToken='',items=[];do{const q='https://www.googleapis.com/blogger/v3/blogs/'+CFG.blogId+'/posts?maxResults=500&fetchBodies=false'+(pageToken?'&pageToken='+encodeURIComponent(pageToken):'');const r=await fetch(q,{headers:{Authorization:'Bearer '+accessToken}});if(!r.ok)throw Error('HTTP '+r.status);const d=await r.json();items.push(...(d.items||[]));pageToken=d.nextPageToken||'';}while(pageToken);let synced=0;items.forEach(p=>{const labels=p.labels||[];const markers=labels.filter(x=>x.indexOf('s803:')===0);if(!markers.length){const title=String(p.title||'').toLowerCase();const match=allEvents.find(ev=>{const a=(ev.home?.name||ev.name||'').toLowerCase(),b=(ev.away?.name||'').toLowerCase();return a&&title.includes(a)&&(b?title.includes(b):true)});if(match)markers.push('s803:'+evKey(match));}markers.forEach(marker=>{const k=marker.slice(5);if(!k||k==='hl')return;postLog[k]={...(postLog[k]||{}),postId:p.id,postUrl:p.url,title:p.title,status:p.status,searchDescription:p.searchDescription||postLog[k]?.searchDescription||'',bloggerSyncedAt:Date.now(),ts:postLog[k]?.ts||Date.now()};synced++;});});saveV10();renderPostLog();renderPostLogDiagnostics();updateStats();if(!silent)toast('Synced '+synced+' Sports 803 post IDs/URLs from Blogger ✓','s')}catch(e){console.warn('[Blogger sync]',e.message);if(!silent)toast('Blogger sync failed: '+e.message,'e')}};
   window.renderPostLogDiagnostics=function(){const el=document.getElementById('post-log-diagnostics-body');if(!el)return;const es=logEntries();const ids={};es.forEach(([k,v])=>{if(v.postId)(ids[v.postId]??=[]).push(k)});const dup=Object.entries(ids).filter(([,ks])=>ks.length>1).map(([id])=>id);el.innerHTML='Total entries: '+es.length+' · with postId: '+es.filter(([,v])=>v.postId).length+' · hasHL: '+es.filter(([,v])=>v.hasHL).length+' · duplicate postIds: '+(dup.join(', ')||'none')+' · orphaned race keys: '+es.filter(([k])=>k.startsWith('race_')).length;};
   window.repairPostLog=function(){postLog=migratePostLog(postLog);prunePostLog();saveV10();renderPostLog();renderPostLogDiagnostics();toast('Post log repaired ✓','s');};
   // Rebind manual URL preview without changing existing UI.
   document.addEventListener('input',e=>{if(e.target.id==='hl-manual-post-url')updateHLResolution();});
+  window.syncPostLogFromCloud=syncPostLogFromCloud;
+  window.pushPostLogToCloud=pushPostLogToCloud;
   renderPostLogDiagnostics();
 })();
 
@@ -5669,6 +5749,6 @@ window.buildRichHighlightSections=function(ev){const h=ev.home?.name||'Home',a=e
 
 
 </script>
-<script type="module" src="../../scripts/match-card-autopush.js"></script>
+<script type="module" src="scripts/match-card-autopush.js"></script>
 </body>
 </html>
