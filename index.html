@@ -709,7 +709,7 @@ button:disabled{opacity:.4;cursor:not-allowed;transform:none!important}
   <div class="settings-grid">
     <div class="card">
       <div class="card-title">Blogger / Google OAuth</div>
-      <div class="form-group"><label>Blog ID</label><input type="text" id="cfg-blogid" placeholder="123456789"></div>
+      <div class="form-group"><label>Blogger blog</label><select id="cfg-blog-select" onchange="selectBloggerBlog(this.value)" disabled><option value="">Sign in to load your blogs</option></select><div id="cfg-blog-status" style="font-size:.65rem;color:var(--muted2);margin-top:5px">Sign in, then choose the blog to publish to.</div></div>
       <div class="form-group"><label>Google OAuth Client ID</label><input type="text" id="cfg-clientid" placeholder="xxx.apps.googleusercontent.com"></div>
       <button class="btn-red btn-sm" onclick="saveCFG()">💾 Save</button>
     </div>
@@ -906,8 +906,8 @@ const TSDB='https://www.thesportsdb.com/api/v1/json/3';
 const CLAUDE_API='https://api.anthropic.com/v1/messages';
 
 let CFG={
-  blogId:'',clientId:'',imgbbKey:'',playerBase:'https://soulmap1.blogspot.com/p/media-player.html',
-  activeLeagues:['ucl','epl','laliga','seriea','bundesliga','f1','nba','wnba','ufc','uwcl','eflt'],
+  blogId:'',blogName:'',clientId:'',imgbbKey:'',playerBase:'https://soulmap1.blogspot.com/p/media-player.html',
+  activeLeagues:['ucl','afconq','euroq','concacafnl','epl','laliga','seriea','bundesliga','f1','nba','wnba','ufc','uwcl','eflt'],
   schedTiming:60,schedStatus:'DRAFT',schedInterval:300000,
   schedEnabled:false,schedThumbs:true,logoOverridesRaw:'',
   mediaPlayerBase:'https://sports803.github.io/player/',
@@ -919,7 +919,7 @@ ytApiKey:''
 };
 let LOGO_OVERRIDES={},LOGO_CACHE={};
 let allEvents=[],channels=[],postLog={};
-let accessToken=null,editingCH=null;
+let accessToken=null,editingCH=null,bloggerBlogs=[];
 let editingPostId=null;   // postId of an existing Blogger post being edited via Compose
 let editingEventKey=null; // evKey() of the event currently being edited
 let schedTimer=null,countdownTimer=null,schedNextFire=null;
@@ -961,6 +961,9 @@ function zhToEn(n){return ZH_EN_TEAMS[n]||n;}
 
 const LEAGUES=[
   {id:'ucl',sport:'soccer',slug:'uefa.champions',name:'Champions League',icon:'🏆',type:'match'},
+  {id:'afconq',sport:'soccer',slug:'caf.nations_qual',name:'Africa Cup of Nations Qualifiers',icon:'🌍',type:'match'},
+  {id:'euroq',sport:'soccer',slug:'uefa.euroq',name:'Euro Qualifiers',icon:'🇪🇺',type:'match'},
+  {id:'concacafnl',sport:'soccer',slug:'concacaf.nations.league',name:'Concacaf Nations League',icon:'🌎',type:'match'},
   {id:'uwcl',source:'oneball',name:'UEFA Women\'s Champions League',icon:'🏆',type:'match'},
   {id:'eflt',source:'oneball',name:'English Football League Trophy',icon:'🏆',type:'match'},
   {id:'uel',sport:'soccer',slug:'uefa.europa',name:'Europa League',icon:'🟠',type:'match'},
@@ -1025,7 +1028,9 @@ function saveAll(){
   try{localStorage.setItem(SK_FR,JSON.stringify({data:fullRacesData,ts:Date.now()}));}catch(e){}
 }
 function saveCFG(){
-  CFG.blogId=v('cfg-blogid');CFG.clientId=v('cfg-clientid');
+  const blogSelect=document.getElementById('cfg-blog-select');
+  if(blogSelect&&blogSelect.value)CFG.blogId=blogSelect.value;
+  CFG.clientId=v('cfg-clientid');
   CFG.imgbbKey=v('cfg-imgbb');CFG.ytApiKey=v('cfg-yt-key');CFG.playerBase=v('cfg-player')||'https://soulmap1.blogspot.com/p/media-player.html';
   CFG.schedTiming=parseInt(document.getElementById('sched-timing')?.value||60);
   CFG.schedStatus=document.getElementById('sched-def-status')?.value||'DRAFT';
@@ -1046,7 +1051,9 @@ function saveCFG(){
   saveAll();updateClaudeStatus();toast('Settings saved ✓','s');
 }
 function applyConfigToUI(){
-  set('cfg-blogid',CFG.blogId);set('cfg-clientid',CFG.clientId);
+  set('cfg-clientid',CFG.clientId);
+  const blogSelect=document.getElementById('cfg-blog-select');
+  if(blogSelect&&blogSelect.options.length>1)blogSelect.value=CFG.blogId||'';
   set('cfg-imgbb',CFG.imgbbKey);set('cfg-yt-key',CFG.ytApiKey||'');set('cfg-player',CFG.playerBase);
   set('cfg-logo-overrides',CFG.logoOverridesRaw);set('player-base',CFG.playerBase);
   if(document.getElementById('sched-timing'))document.getElementById('sched-timing').value=CFG.schedTiming||60;
@@ -1830,14 +1837,37 @@ function updateIframeBox(){const urls=getMoraURLs();document.getElementById('ifr
 function insertIframe(){const urls=getMoraURLs();if(!urls.length){toast('Add at least one stream URL','w');return;}const body=document.getElementById('post-body');body.value+=(body.value?'\n\n':'')+buildIframe(urls);updateSEO();toast('iframe inserted ✓','s');}
 
 // ═══ BLOGGER AUTH ═══
+function setBloggerBlogStatus(msg,type=''){const el=document.getElementById('cfg-blog-status');if(el){el.textContent=msg;el.style.color=type==='e'?'var(--red)':type==='s'?'var(--green)':'var(--muted2)';}}
+function renderBloggerBlogs(){
+  const sel=document.getElementById('cfg-blog-select');if(!sel)return;
+  sel.innerHTML='<option value="">— choose a blog —</option>'+bloggerBlogs.map(b=>'<option value="'+String(b.id).replace(/"/g,'&quot;')+'">'+String(b.name||b.url||b.id).replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</option>').join('');
+  sel.disabled=!bloggerBlogs.length;
+  if(CFG.blogId&&bloggerBlogs.some(b=>String(b.id)===String(CFG.blogId)))sel.value=CFG.blogId;
+  else if(bloggerBlogs.length===1){sel.value=String(bloggerBlogs[0].id);selectBloggerBlog(sel.value);}
+  setBloggerBlogStatus(bloggerBlogs.length?bloggerBlogs.length+' blog'+(bloggerBlogs.length===1?'':'s')+' available — choose one to publish':'No Blogger blogs found',''+(bloggerBlogs.length?'':'e'));
+}
+function selectBloggerBlog(id){
+  const blog=bloggerBlogs.find(b=>String(b.id)===String(id));
+  CFG.blogId=blog?String(blog.id):'';CFG.blogName=blog?(blog.name||blog.url||''):'';saveAll();
+  if(blog)setBloggerBlogStatus('Selected: '+CFG.blogName,'s');
+}
+async function loadBloggerBlogs(){
+  if(!accessToken)return;
+  setBloggerBlogStatus('Loading your Blogger blogs…');
+  try{
+    const res=await fetch('https://www.googleapis.com/blogger/v3/users/self/blogs?maxResults=100',{headers:{Authorization:'Bearer '+accessToken}});
+    if(!res.ok)throw new Error('Blogger '+res.status+': '+await res.text());
+    const data=await res.json();bloggerBlogs=data.items||[];renderBloggerBlogs();
+  }catch(e){bloggerBlogs=[];renderBloggerBlogs();setBloggerBlogStatus('Could not load blogs: '+e.message,'e');toast('Could not load Blogger blogs','e');}
+}
 function handleAuth(){
   if(accessToken){signOut();return;}if(!CFG.clientId){toast('Enter OAuth Client ID in Settings','e');return;}
-  const client=google.accounts.oauth2.initTokenClient({client_id:CFG.clientId,scope:'https://www.googleapis.com/auth/blogger',callback:r=>{if(r.error){toast('Auth error: '+r.error,'e');return;}accessToken=r.access_token;document.getElementById('auth-dot').className='on';document.getElementById('auth-label').textContent='Signed in';document.getElementById('auth-label').style.color='var(--green)';document.getElementById('auth-btn').textContent='Sign out';toast('Signed in ✓','s');}});
+  const client=google.accounts.oauth2.initTokenClient({client_id:CFG.clientId,scope:'https://www.googleapis.com/auth/blogger',callback:async r=>{if(r.error){toast('Auth error: '+r.error,'e');return;}accessToken=r.access_token;document.getElementById('auth-dot').className='on';document.getElementById('auth-label').textContent='Signed in';document.getElementById('auth-label').style.color='var(--green)';document.getElementById('auth-btn').textContent='Sign out';toast('Signed in ✓ — loading blogs…','s');await loadBloggerBlogs();}});
   client.requestAccessToken();
 }
-function signOut(){if(accessToken)try{google.accounts.oauth2.revoke(accessToken,()=>{});}catch(e){}accessToken=null;document.getElementById('auth-dot').className='';document.getElementById('auth-label').textContent='Not signed in';document.getElementById('auth-label').style.color='var(--muted)';document.getElementById('auth-btn').textContent='Sign in';toast('Signed out','i');}
+function signOut(){if(accessToken)try{google.accounts.oauth2.revoke(accessToken,()=>{});}catch(e){}accessToken=null;bloggerBlogs=[];CFG.blogId='';CFG.blogName='';saveAll();const sel=document.getElementById('cfg-blog-select');if(sel){sel.innerHTML='<option value="">Sign in to load your blogs</option>';sel.disabled=true;}setBloggerBlogStatus('Sign in, then choose the blog to publish to.');document.getElementById('auth-dot').className='';document.getElementById('auth-label').textContent='Not signed in';document.getElementById('auth-label').style.color='var(--muted)';document.getElementById('auth-btn').textContent='Sign in';toast('Signed out','i');}
 async function postToBlogger(){
-  if(!accessToken){toast('Sign in first','e');return;}if(!CFG.blogId){toast('Enter Blog ID in Settings','e');return;}
+  if(!accessToken){toast('Sign in first','e');return;}if(!CFG.blogId){toast('Sign in and choose a Blogger blog in Settings','e');return;}
   const t=v('post-title'),b=document.getElementById('post-body').value.trim(),st=v('post-status');
   const labels=v('post-labels').split(',').map(s=>s.trim()).filter(Boolean);
   if(!t||!b){toast('Title and body required','e');return;}
@@ -2009,7 +2039,7 @@ async function uploadHLThumb(){
 async function postHighlights(){
   const idx=parseInt(document.getElementById('hl-select').value);if(isNaN(idx)){toast('Select an event','i');return;}const ev=allEvents[idx];if(!ev)return;
   const body=document.getElementById('hl-body').value.trim();if(!body){toast('Write/generate text first','i');return;}
-  if(!accessToken||!CFG.blogId){toast('Sign in and set Blog ID','e');return;}
+  if(!accessToken||!CFG.blogId){toast('Sign in and choose a Blogger blog','e');return;}
   const label=ev.type==='race'?ev.name:ev.home.name+' vs '+ev.away.name;const title=label+' – Highlights & Replay | Sports 803';
   const video=v('hl-video');
   // Use buildMultiSourceIframe for the video so it goes through the player
@@ -2630,7 +2660,7 @@ async function genRacePost(id){
 // ── Quick Post: posts directly to Blogger with title, thumbnail, article, and player iframe
 async function quickPostRace(id){
   if(!accessToken){toast('Sign in with Google first','e');return;}
-  if(!CFG.blogId){toast('Add your Blog ID in Settings','e');return;}
+  if(!CFG.blogId){toast('Choose a Blogger blog in Settings','e');return;}
   const race=findRace(id);if(!race)return;
   toast('Building race post…','i');
 
