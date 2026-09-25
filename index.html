@@ -1645,7 +1645,7 @@ button:disabled { opacity: .4; cursor: not-allowed; transform: none !important; 
 
       <div class="card">
         <div class="card-title">🎥 Stream Links</div>
-        <div class="form-group"><label>Player Base URL</label><input type="text" id="player-base" value="https://sports803.github.io/player/"></div>
+        <div class="form-group"><label>Player Base URL</label><input type="text" id="player-base" value="https://sport803.github.io/player/"></div>
         <div id="stream-list">
           <div class="stream-row"><input type="text" placeholder="https://stream-source.com/…" class="mora-input" oninput="updateIframeBox()"><button class="btn-ghost btn-sm" onclick="removeStream(this)">✕</button></div>
         </div>
@@ -2003,7 +2003,7 @@ button:disabled { opacity: .4; cursor: not-allowed; transform: none !important; 
         </span>
       </div>
       <div class="settings-grid" style="margin-bottom:12px">
-        <div class="form-group"><label>Media Player Base URL</label><input type="text" id="cfg-media-player-base" placeholder="https://sports803.github.io/player/"></div>
+        <div class="form-group"><label>Media Player Base URL</label><input type="text" id="cfg-media-player-base" placeholder="https://sport803.github.io/player/"></div>
       </div>
       <div class="settings-grid" style="margin-bottom:12px">
         <div class="form-group"><label>Event Firebase Database URL</label><input type="text" id="cfg-firebase-url" placeholder="https://sports-803-1b806-default-rtdb.firebaseio.com"></div>
@@ -2207,11 +2207,11 @@ const EVENT_FIREBASE_ONEBALL_PATH = 's803config/oneball';
 
 // ----- STATE -----
 let CFG = {
-  blogId: '', clientId: EVENT_BUILTIN_CLIENT_ID, imgbbKey: '', playerBase: 'https://sports803.github.io/player/', Url: '', Username: '',
+  blogId: '', clientId: EVENT_BUILTIN_CLIENT_ID, imgbbKey: '', playerBase: 'https://sport803.github.io/player/', Url: '', Username: '',
   activeLeagues: ['ucl', 'uwcl', 'epl', 'laliga', 'seriea', 'bundesliga', 'f1', 'nba', 'wnba', 'efltrophy', 'afconqual', 'euroqual', 'concacafnl', 'nations', 'ufc'],
   schedTiming: 60, schedStatus: 'DRAFT', schedInterval: 300000,
   schedEnabled: false, schedThumbs: true, logoOverridesRaw: '',
-  mediaPlayerBase: 'https://sports803.github.io/player/',
+  mediaPlayerBase: 'https://sport803.github.io/player/',
   ppvtvMatchesApi: 'https://august.ppvtv.icu/api/matches.json',
   firebaseDatabaseUrl: EVENT_FIREBASE_DATABASE_URL,
   firebaseEventsPath: EVENT_FIREBASE_EVENTS_PATH,
@@ -2341,7 +2341,7 @@ function loadAll() {
 }
 
 function persistCFG({ silent = false } = {}) {
-  CFG.blogId = v('cfg-blogid'); CFG.clientId = v('cfg-clientid') || EVENT_BUILTIN_CLIENT_ID; CFG.imgbbKey = v('cfg-imgbb'); CFG.ytApiKey = v('cfg-yt-key'); CFG.playerBase = v('cfg-player') || 'https://sports803.github.io/player/'; CFG.schedTiming = parseInt(document.getElementById('sched-timing')?.value || 60); CFG.schedStatus = document.getElementById('sched-def-status')?.value || 'DRAFT'; CFG.schedInterval = parseInt(document.getElementById('sched-interval')?.value || 300000); CFG.schedThumbs = document.getElementById('sched-thumbs')?.checked || false; CFG.mediaPlayerBase = v('cfg-media-player-base') || 'https://sports803.github.io/player/'; CFG.ppvtvMatchesApi = v('cfg-ppvtv-api') || CFG.ppvtvMatchesApi; CFG.firebaseDatabaseUrl = v('cfg-firebase-url') || EVENT_FIREBASE_DATABASE_URL; CFG.firebaseEventsPath = v('cfg-firebase-events-path') || EVENT_FIREBASE_EVENTS_PATH; CFG.firebaseChannelsPath = v('cfg-firebase-channels-path') || EVENT_FIREBASE_CHANNELS_PATH; CFG.firebasePostLogPath = v('cfg-firebase-post-log-path') || EVENT_FIREBASE_POST_LOG_PATH; CFG.autoFetchStreams = !!document.getElementById('cfg-auto-fetch-streams')?.checked; CFG.enableDdkanqu = !!document.getElementById('cfg-enable-ddkanqu')?.checked; CFG.enableOneTV = !!document.getElementById('cfg-enable-onetv')?.checked; CFG.enablePPVTV = document.getElementById('cfg-enable-ppvtv')?.checked ?? true; CFG.embedStreamsInPost = document.getElementById('cfg-embed-streams-in-post')?.checked ?? true; CFG.ddkanquMappingsRaw = v('cfg-ddkanqu-mappings'); CFG.deepseekKey = v('cfg-deepseek-key'); CFG.deepseekModel = document.getElementById('cfg-deepseek-model')?.value || CFG.deepseekModel; CFG.deepseekTone = v('cfg-deepseek-tone'); CFG.deepseekLength = document.getElementById('cfg-deepseek-length')?.value || CFG.deepseekLength; ddkanquMappings = parseDDKMappings(CFG.ddkanquMappingsRaw); saveAll(); updateClaudeStatus(); if (!silent) toast('Settings saved ✓', 's');
+  CFG.blogId = v('cfg-blogid'); CFG.clientId = v('cfg-clientid') || EVENT_BUILTIN_CLIENT_ID; CFG.imgbbKey = v('cfg-imgbb'); CFG.ytApiKey = v('cfg-yt-key'); CFG.playerBase = v('cfg-player') || 'https://sport803.github.io/player/'; CFG.schedTiming = parseInt(document.getElementById('sched-timing')?.value || 60); CFG.schedStatus = document.getElementById('sched-def-status')?.value || 'DRAFT'; CFG.schedInterval = parseInt(document.getElementById('sched-interval')?.value || 300000); CFG.schedThumbs = document.getElementById('sched-thumbs')?.checked || false; CFG.mediaPlayerBase = v('cfg-media-player-base') || 'https://sport803.github.io/player/'; CFG.ppvtvMatchesApi = v('cfg-ppvtv-api') || CFG.ppvtvMatchesApi; CFG.firebaseDatabaseUrl = v('cfg-firebase-url') || EVENT_FIREBASE_DATABASE_URL; CFG.firebaseEventsPath = v('cfg-firebase-events-path') || EVENT_FIREBASE_EVENTS_PATH; CFG.firebaseChannelsPath = v('cfg-firebase-channels-path') || EVENT_FIREBASE_CHANNELS_PATH; CFG.firebasePostLogPath = v('cfg-firebase-post-log-path') || EVENT_FIREBASE_POST_LOG_PATH; CFG.autoFetchStreams = !!document.getElementById('cfg-auto-fetch-streams')?.checked; CFG.enableDdkanqu = !!document.getElementById('cfg-enable-ddkanqu')?.checked; CFG.enableOneTV = !!document.getElementById('cfg-enable-onetv')?.checked; CFG.enablePPVTV = document.getElementById('cfg-enable-ppvtv')?.checked ?? true; CFG.embedStreamsInPost = document.getElementById('cfg-embed-streams-in-post')?.checked ?? true; CFG.ddkanquMappingsRaw = v('cfg-ddkanqu-mappings'); CFG.deepseekKey = v('cfg-deepseek-key'); CFG.deepseekModel = document.getElementById('cfg-deepseek-model')?.value || CFG.deepseekModel; CFG.deepseekTone = v('cfg-deepseek-tone'); CFG.deepseekLength = document.getElementById('cfg-deepseek-length')?.value || CFG.deepseekLength; ddkanquMappings = parseDDKMappings(CFG.ddkanquMappingsRaw); saveAll(); updateClaudeStatus(); if (!silent) toast('Settings saved ✓', 's');
 }
 
 function saveCFG() {
@@ -2349,12 +2349,12 @@ function saveCFG() {
   CFG.clientId = v('cfg-clientid') || EVENT_BUILTIN_CLIENT_ID;
   CFG.imgbbKey = v('cfg-imgbb');
   CFG.ytApiKey = v('cfg-yt-key');
-  CFG.playerBase = v('cfg-player') || 'https://sports803.github.io/player/';
+  CFG.playerBase = v('cfg-player') || 'https://sport803.github.io/player/';
   CFG.schedTiming = parseInt(document.getElementById('sched-timing')?.value || 60);
   CFG.schedStatus = document.getElementById('sched-def-status')?.value || 'DRAFT';
   CFG.schedInterval = parseInt(document.getElementById('sched-interval')?.value || 300000);
   CFG.schedThumbs = document.getElementById('sched-thumbs')?.checked || false;
-  CFG.mediaPlayerBase = v('cfg-media-player-base') || 'https://sports803.github.io/player/';
+  CFG.mediaPlayerBase = v('cfg-media-player-base') || 'https://sport803.github.io/player/';
   CFG.ppvtvMatchesApi = v('cfg-ppvtv-api') || 'https://august.ppvtv.icu/api/matches.json';
   CFG.firebaseDatabaseUrl = v('cfg-firebase-url') || EVENT_FIREBASE_DATABASE_URL;
   CFG.firebaseEventsPath = v('cfg-firebase-events-path') || EVENT_FIREBASE_EVENTS_PATH;
@@ -2568,7 +2568,7 @@ const Compose = {
     const body = document.getElementById('post-body');
     const ev = currentComposeEv;
     const h = ev?.home?.name || 'Home', a = ev?.away?.name || 'Away';
-    const player = CFG.playerBase || 'https://sports803.github.io/player/';
+    const player = CFG.playerBase || 'https://sport803.github.io/player/';
     let html = '';
     switch (type) {
       case 'preview':
@@ -2652,7 +2652,7 @@ const DS_LENGTH_WORDS = { short: 300, medium: 600, long: 1000, xl: 1500 };
 function buildClaudePrompt(title, ev, isHighlights = false) {
   const words = DS_LENGTH_WORDS[CFG.deepseekLength] || 600;
   const tone = CFG.deepseekTone || 'enthusiastic sports journalist';
-  const player = CFG.playerBase || 'https://sports803.github.io/player/';
+  const player = CFG.playerBase || 'https://sport803.github.io/player/';
   if (isHighlights && ev && ev.type === 'match') {
     const h = ev.home.name, a = ev.away.name, lg = ev.league.name;
     const score = ev.home.score !== '' ? h + ' ' + ev.home.score + '–' + ev.away.score + ' ' + a : '';
@@ -4365,7 +4365,7 @@ async function getAllStreamSourcesForEvent(ev) {
 
 function buildSports803PlayerUrl(sources) {
   if (!sources || !sources.length) return '';
-  const base = (CFG.mediaPlayerBase || 'https://sports803.github.io/player/').replace(/\/$/, '');
+  const base = (CFG.mediaPlayerBase || 'https://sport803.github.io/player/').replace(/\/$/, '');
   const one = sources.find(s => s.type === 'one' || s.type === 'm3u8');
   const mora = sources.find(s => s.type === 'mora' || s.type === 'hls');
   const embeds = sources.filter(s => s.type === 'embed');
@@ -4727,7 +4727,7 @@ function canonicalOneBallReplayUrl(url) {
   } catch (e) {}
   return raw.replace(/\/\/+/, '/').replace('https:/', 'https://');
 }
-function playerBaseUrl() { return (CFG.playerBase || 'https://sports803.github.io/player/').replace(/\/?$/, '/') ; }
+function playerBaseUrl() { return (CFG.playerBase || 'https://sport803.github.io/player/').replace(/\/?$/, '/') ; }
 function buildHighlightsPlayerIframe(url) {
   if (!url) return '';
   const replay = canonicalOneBallReplayUrl(url);
@@ -4924,7 +4924,7 @@ async function scrapeFullRacesURL(url, silent = false) {
   const parsed = parseFullRacesPage(html, url);
   const title = parsed.title, previewImg = parsed.previewImg, sources = parsed.sources;
   sources.forEach(s => { if (!silent) frLog('  [' + s.type + '] ' + s.label + ': ' + s.url); });
-  const playerBase = (CFG.mediaPlayerBase || CFG.playerBase || 'https://sports803.github.io/player/').replace(/\/$/, '');
+  const playerBase = (CFG.mediaPlayerBase || CFG.playerBase || 'https://sport803.github.io/player/').replace(/\/$/, '');
   const playerUrl = sources.length ? playerBase + '?' + sources.map(s => 'embed=' + encodeURIComponent(s.url)).join('&') : playerBase;
   if (!silent) frLog('  ✓ Player URL: ' + playerUrl);
   const dateMatch = (title + ' ' + url).match(/(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}[,\s]+\d{4}/i);
@@ -4946,7 +4946,7 @@ async function scrapeFullRacesURL(url, silent = false) {
 
 function buildRacePlayerIframe(race) {
   if (!race || !race.sources || !race.sources.length) return '';
-  const playerBase = (CFG.mediaPlayerBase || CFG.playerBase || 'https://sports803.github.io/player/').replace(/\/?$/, '/');
+  const playerBase = (CFG.mediaPlayerBase || CFG.playerBase || 'https://sport803.github.io/player/').replace(/\/?$/, '/');
   const params = race.sources.map(s => {
     const type = s.type === 'one' ? 'one' : ((s.url.includes('ddkaqiu.com') || s.url.includes('www.ddkqax.com')) ? 'mora' : 'embed');
     return type === 'one' ? 'one=' + s.url : type + '=' + encodeURIComponent(s.url);
@@ -5145,13 +5145,13 @@ async function buildRaceArticleBody(race) {
     try {
       const words = { short: 300, medium: 600, long: 1000, xl: 1500 }[CFG.deepseekLength] || 600;
       const tone = CFG.deepseekTone || 'enthusiastic sports journalist';
-      const player = (CFG.mediaPlayerBase || CFG.playerBase || 'https://sports803.github.io/player/').replace(/\/$/, '');
+      const player = (CFG.mediaPlayerBase || CFG.playerBase || 'https://sport803.github.io/player/').replace(/\/$/, '');
       const prompt = 'You are a ' + tone + ' writing for Sports 803.\nWrite a full race replay article for: "' + race.title + '".\n' + (race.dateStr ? 'Race date: ' + race.dateStr + '.\n' : '') + (race.sportSlug ? 'Sport: ' + race.sportSlug + '.\n' : '') + 'Requirements:\n- ~' + words + ' words\n- HTML format: use <h2>, <p>, <strong>, <ul><li>\n- Sections: Race Overview, Key Moments, Championship Impact, How To Watch\n- End with: <p>📺 Watch the full race replay FREE on Sports 803: <a href="' + player + '">' + player + '</a></p>\n- Only article HTML, no DOCTYPE or body tags';
       const article = await callClaude(prompt);
       if (article && article.length > 100) return article;
     } catch (e) { console.warn('[Claude race article]', e.message); }
   }
-  const player = (CFG.mediaPlayerBase || CFG.playerBase || 'https://sports803.github.io/player/').replace(/\/$/, '');
+  const player = (CFG.mediaPlayerBase || CFG.playerBase || 'https://sport803.github.io/player/').replace(/\/$/, '');
   return buildRaceTemplateBody(race) + '\n<p>📺 Watch FREE on Sports 803: <a href="' + player + '">' + player + '</a></p>';
 }
 
@@ -5884,7 +5884,7 @@ function applyConfigToUI() {
   if (document.getElementById('sched-thumbs')) document.getElementById('sched-thumbs').checked = CFG.schedThumbs || false;
   if (document.getElementById('sched-enabled')) document.getElementById('sched-enabled').checked = CFG.schedEnabled || false;
   document.getElementById('st-leagues').textContent = CFG.activeLeagues.length;
-  set('cfg-media-player-base', CFG.mediaPlayerBase || 'https://sports803.github.io/player/');
+  set('cfg-media-player-base', CFG.mediaPlayerBase || 'https://sport803.github.io/player/');
   set('cfg-ppvtv-api', CFG.ppvtvMatchesApi || 'https://august.ppvtv.icu/api/matches.json');
   set('cfg-firebase-url', CFG.firebaseDatabaseUrl || EVENT_FIREBASE_DATABASE_URL);
   set('cfg-firebase-events-path', CFG.firebaseEventsPath || EVENT_FIREBASE_EVENTS_PATH);
