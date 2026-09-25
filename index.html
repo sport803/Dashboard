@@ -593,6 +593,20 @@ button:disabled { opacity: .4; cursor: not-allowed; transform: none !important; 
   object-fit: contain;
   display: block;
 }
+.logo-chip-fallback {
+  background: var(--team-fallback-color, var(--bg4));
+  color: #fff;
+  font-weight: 900;
+  font-size: .9rem;
+  font-family: var(--cond);
+  letter-spacing: .05em;
+}
+.logo-chip-initials {
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+}
 
 .thumb-badge {
   display: inline-flex;
@@ -2194,7 +2208,7 @@ const EVENT_FIREBASE_ONEBALL_PATH = 's803config/oneball';
 // ----- STATE -----
 let CFG = {
   blogId: '', clientId: EVENT_BUILTIN_CLIENT_ID, imgbbKey: '', playerBase: 'https://sports803.github.io/player/', Url: '', Username: '',
-  activeLeagues: ['ucl', 'uwcl', 'epl', 'laliga', 'seriea', 'bundesliga', 'f1', 'nba', 'wnba', 'efltrophy', 'afconqual', 'euroqual', 'concacafnl', 'ufc'],
+  activeLeagues: ['ucl', 'uwcl', 'epl', 'laliga', 'seriea', 'bundesliga', 'f1', 'nba', 'wnba', 'efltrophy', 'afconqual', 'euroqual', 'concacafnl', 'nations', 'ufc'],
   schedTiming: 60, schedStatus: 'DRAFT', schedInterval: 300000,
   schedEnabled: false, schedThumbs: true, logoOverridesRaw: '',
   mediaPlayerBase: 'https://sports803.github.io/player/',
@@ -2395,6 +2409,28 @@ const ZH_EN_TEAMS = {
 };
 function zhToEn(n) { return ZH_EN_TEAMS[n] || n; }
 
+// Country codes used for national-team flag fallbacks.
+const COUNTRY_ISO = {
+  'england': 'gb-eng', 'scotland': 'gb-sct', 'wales': 'gb-wls', 'northern ireland': 'gb-nir',
+  'france': 'fr', 'spain': 'es', 'italy': 'it', 'germany': 'de', 'portugal': 'pt',
+  'netherlands': 'nl', 'belgium': 'be', 'croatia': 'hr', 'denmark': 'dk', 'switzerland': 'ch',
+  'poland': 'pl', 'austria': 'at', 'turkey': 'tr', 'greece': 'gr', 'norway': 'no',
+  'sweden': 'se', 'serbia': 'rs', 'ukraine': 'ua', 'czechia': 'cz', 'czech republic': 'cz',
+  'hungary': 'hu', 'romania': 'ro', 'ireland': 'ie', 'finland': 'fi', 'iceland': 'is',
+  'albania': 'al', 'bosnia and herzegovina': 'ba', 'slovenia': 'si', 'slovakia': 'sk',
+  'israel': 'il', 'usa': 'us', 'united states': 'us', 'mexico': 'mx', 'canada': 'ca',
+  'brazil': 'br', 'argentina': 'ar', 'uruguay': 'uy', 'colombia': 'co', 'japan': 'jp',
+  'south korea': 'kr', 'korea republic': 'kr', 'australia': 'au', 'morocco': 'ma',
+  'senegal': 'sn', 'nigeria': 'ng', 'egypt': 'eg', 'cameroon': 'cm', 'ghana': 'gh',
+  'ivory coast': 'ci', 'cote d ivoire': 'ci'
+};
+
+function getCountryISO(teamName) {
+  const key = String(teamName || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  return COUNTRY_ISO[key] || '';
+}
+
 // ----- LEAGUES -----
 const LEAGUES = [
   { id: 'ucl', sport: 'soccer', slug: 'uefa.champions', name: 'Champions League', icon: '🏆', type: 'match' },
@@ -2411,6 +2447,7 @@ const LEAGUES = [
   { id: 'afconqual', sport: 'soccer', slug: 'caf.nations_qual', name: 'Africa Cup of Nations Qualifiers', icon: '🌍', type: 'match' },
   { id: 'euroqual', sport: 'soccer', slug: 'uefa.euroq', name: 'UEFA Euro Qualifiers', icon: '🇪🇺', type: 'match' },
   { id: 'concacafnl', sport: 'soccer', slug: 'concacaf.nations.league', name: 'Concacaf Nations League', icon: '🌎', type: 'match' },
+  { id: 'nations', sport: 'soccer', slug: 'uefa.nations', name: 'UEFA Nations League', icon: '🌍', type: 'match' },
   { id: 'intlfriendly', sport: 'soccer', slug: 'fifa.friendly', name: 'Intl Friendlies', icon: '🤝', type: 'match' },
   { id: 'nba', sport: 'basketball', slug: 'nba', name: 'NBA', icon: '🏀', type: 'match' },
   { id: 'wnba', sport: 'basketball', slug: 'wnba', name: "Women's National Basketball Association", icon: '🏀', type: 'match' },
@@ -3050,18 +3087,23 @@ async function fetchAllEvents() {
 }
 
 async function fetchLeague(league) {
-  try {
-    const td = v('target-date');
-    const dp = td ? '?dates=' + td.replace(/-/g, '') : '';
-    const res = await fetch(ESPN + '/' + league.sport + '/' + league.slug + '/scoreboard' + dp);
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    if (!data.events || !Array.isArray(data.events)) return [];
-    return data.events.map(ev => parseESPN(ev, league));
-  } catch (e) {
-    console.warn('[Fetch] ' + league.name + ':', e.message);
-    return [];
+  const slugsToTry = [league.slug];
+  if (league.id === 'nations') slugsToTry.push('uefa.nations_league');
+  for (const slug of slugsToTry) {
+    try {
+      const td = v('target-date');
+      const dp = td ? '?dates=' + td.replace(/-/g, '') : '';
+      const res = await fetch(ESPN + '/' + league.sport + '/' + slug + '/scoreboard' + dp);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      if (Array.isArray(data.events) && data.events.length > 0) {
+        return data.events.map(ev => parseESPN(ev, league));
+      }
+    } catch (e) {
+      console.warn('[Fetch] ' + league.name + ' (slug: ' + slug + '):', e.message);
+    }
   }
+  return [];
 }
 
 function parseESPN(ev, league) {
@@ -3082,8 +3124,14 @@ function parseESPN(ev, league) {
   const home = comps.find(c => c.homeAway === 'home') || comps[0] || {};
   const away = comps.find(c => c.homeAway === 'away') || comps[1] || {};
   const getRawLogo = c => {
-    const href = (c.team?.logos?.find(l => l.href && l.width >= 50) || c.team?.logos?.[0])?.href || '';
-    return href ? href.replace(/^http:\/\//i, 'https://') : '';
+    const team = c.team || {};
+    const candidates = [
+      ...(Array.isArray(team.logos) ? team.logos.map(logo => ({ href: logo?.href, width: logo?.width || 0 })) : []),
+      team.logo ? { href: team.logo, width: 0 } : null,
+      team.flag?.href ? { href: team.flag.href, width: 0 } : null
+    ].filter(candidate => candidate && candidate.href);
+    candidates.sort((a, b) => b.width - a.width);
+    return candidates[0]?.href ? String(candidates[0].href).replace(/^http:\/\//i, 'https://') : '';
   };
   return {
     id: ev.id, league, type: 'match',
@@ -3102,62 +3150,106 @@ function wsrv(url, size = 200) {
   return 'https://wsrv.nl/?url=' + encodeURIComponent(value) + '&w=' + size + '&h=' + size + '&fit=contain&n=-1&we';
 }
 const TSDB_INFLIGHT = new Set();
-const LOGO_TTL = 7 * 86400000, LOGO_FAILURE_TTL = 10 * 60000;
+const LOGO_TTL = 7 * 86400000;
+const LOGO_FAILURE_TTL = 3 * 60000;
 let tsdbNextRequest = 0, tsdbBackoffUntil = 0;
+
 async function fetchLogo(teamName) {
   if (!teamName) return '';
   const key = teamName.toLowerCase().trim();
   if (LOGO_OVERRIDES[key]) return LOGO_OVERRIDES[key];
-  const cached = LOGO_CACHE[key]; if (cached && (Date.now() - (cached.ts || 0) < (cached.url ? LOGO_TTL : LOGO_FAILURE_TTL))) return cached.url || ''; if (cached) delete LOGO_CACHE[key];
-  if (TSDB_INFLIGHT.has(key)) { await new Promise(r => setTimeout(r, 2500)); return LOGO_CACHE[key]?.url || ''; }
+  const cached = LOGO_CACHE[key];
+  if (cached && Date.now() - (cached.ts || 0) < (cached.url ? LOGO_TTL : LOGO_FAILURE_TTL)) return cached.url || '';
+  if (cached) delete LOGO_CACHE[key];
+  if (TSDB_INFLIGHT.has(key)) {
+    await new Promise(resolve => setTimeout(resolve, 2500));
+    return LOGO_CACHE[key]?.url || '';
+  }
+
   TSDB_INFLIGHT.add(key);
-  try { const wait = Math.max(0, tsdbNextRequest - Date.now(), tsdbBackoffUntil - Date.now()); if (wait) await new Promise(r => setTimeout(r, wait)); tsdbNextRequest = Date.now() + 2200;
+  try {
+    // Reserve a request slot before awaiting so concurrent callers remain rate-limited.
+    const now = Date.now();
+    const scheduledAt = Math.max(now, tsdbNextRequest, tsdbBackoffUntil);
+    tsdbNextRequest = scheduledAt + 1300;
+    if (scheduledAt > now) await new Promise(resolve => setTimeout(resolve, scheduledAt - now));
     const res = await fetch(TSDB + '/searchteams.php?t=' + encodeURIComponent(teamName));
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     const team = data?.teams?.[0];
     const url = team?.strTeamBadge || team?.strBadge || team?.strTeamLogo || '';
-    LOGO_CACHE[key] = { url, ts: Date.now() };
-    saveAll();
-    return url;
+    if (url) {
+      const safeUrl = String(url).replace(/^http:\/\//i, 'https://');
+      LOGO_CACHE[key] = { url: safeUrl, ts: Date.now() };
+      saveAll();
+      return safeUrl;
+    }
+    // A successful response with no matching badge is not an API failure.
+    return '';
   } catch (e) {
-    LOGO_CACHE[key] = { url: '', ts: Date.now() }; if (/429/.test(e.message || '')) tsdbBackoffUntil = Date.now() + 30000; return '';
+    if (/429/.test(e.message || '')) {
+      tsdbBackoffUntil = Date.now() + 10000;
+      return '';
+    }
+    LOGO_CACHE[key] = { url: '', ts: Date.now() };
+    return '';
   } finally {
     TSDB_INFLIGHT.delete(key);
   }
 }
 
 async function enrichLogos(events) {
-  const matchEvs = events.filter(e => e.type === 'match');
+  const matchEvs = events.filter(event => event.type === 'match');
+  const nationalLeagueIds = new Set(['nations', 'euroqual', 'afconqual', 'worldcup', 'euro', 'concacafnl', 'intlfriendly']);
+  const isNationalTeamLeague = event => nationalLeagueIds.has(event.league?.id);
   const needsFetch = new Set();
-  for (const ev of matchEvs) {
-    for (const s of [ev.home, ev.away]) {
-      const k = s.name.toLowerCase();
-      if ((!LOGO_CACHE[k] || Date.now() - (LOGO_CACHE[k].ts || 0) > (LOGO_CACHE[k].url ? LOGO_TTL : LOGO_FAILURE_TTL)) && !LOGO_OVERRIDES[k]) needsFetch.add(s.name);
+
+  for (const event of matchEvs) {
+    if (isNationalTeamLeague(event)) continue;
+    for (const team of [event.home, event.away]) {
+      const key = team.name.toLowerCase();
+      const cache = LOGO_CACHE[key];
+      if ((!cache || Date.now() - (cache.ts || 0) > (cache.url ? LOGO_TTL : LOGO_FAILURE_TTL)) && !LOGO_OVERRIDES[key]) {
+        needsFetch.add(team.name);
+      }
     }
   }
+
   const toFetch = [...needsFetch];
-  for (let i = 0; i < toFetch.length; i += 6) {
-    await Promise.allSettled(toFetch.slice(i, i + 6).map(t => fetchLogo(t)));
-    if (i + 6 < toFetch.length) await new Promise(r => setTimeout(r, 80));
+  for (let index = 0; index < toFetch.length; index += 6) {
+    await Promise.allSettled(toFetch.slice(index, index + 6).map(name => fetchLogo(name)));
+    if (index + 6 < toFetch.length) await new Promise(resolve => setTimeout(resolve, 80));
   }
+
   let total = 0, resolved = 0;
-  for (const ev of matchEvs) {
-    for (const s of [ev.home, ev.away]) {
+  for (const event of matchEvs) {
+    for (const team of [event.home, event.away]) {
       total++;
-      const key = s.name.toLowerCase();
+      const key = team.name.toLowerCase();
       const override = LOGO_OVERRIDES[key] || '';
-      const tsdb = LOGO_CACHE[key]?.url || '';
-      const espnSafe = s.logo ? s.logo.replace(/^http:\/\//i, 'https://') : '';
-      if (override) { s.logo = override; resolved++; }
-      else if (tsdb) { s.logo = tsdb; resolved++; }
-      else if (espnSafe) { s.logo = espnSafe; resolved++; }
-      else s.logo = '';
+      const espnLogo = team.logo ? team.logo.replace(/^http:\/\//i, 'https://') : '';
+      const tsdbLogo = LOGO_CACHE[key]?.url || '';
+      if (override) {
+        team.logo = override;
+        resolved++;
+      } else if (espnLogo) {
+        team.logo = espnLogo;
+        resolved++;
+      } else if (tsdbLogo) {
+        team.logo = tsdbLogo;
+        resolved++;
+      } else if (isNationalTeamLeague(event) && getCountryISO(team.name)) {
+        team.logo = 'https://flagcdn.com/w160/' + getCountryISO(team.name) + '.png';
+        resolved++;
+      } else {
+        team.logo = '';
+      }
     }
   }
+
   const pct = total ? Math.round((resolved / total) * 100) : 0;
   const el = document.getElementById('logo-status');
-  if (el) el.innerHTML = '<span style="color:var(--green);font-weight:700">' + resolved + '</span>/<span style="color:var(--text)">' + total + '</span> logos resolved (' + pct + '%) — TSDB hits: ' + Object.values(LOGO_CACHE).filter(x => x && (x.url || x)).length;
+  if (el) el.innerHTML = '<span style="color:var(--green);font-weight:700">' + resolved + '</span>/<span style="color:var(--text)">' + total + '</span> logos resolved (' + pct + '%) — TSDB hits: ' + Object.values(LOGO_CACHE).filter(entry => entry?.url).length;
   const bar = document.getElementById('logo-bar');
   if (bar) bar.style.width = pct + '%';
   saveAll();
@@ -3701,24 +3793,60 @@ function renderEventCards(events) {
   grid.innerHTML = filtered.map(ev => ev.type === 'race' ? renderRaceCard(ev) : renderMatchCard(ev)).join('');
 }
 
+function getTeamColor(teamName) {
+  const colors = ['#e63946', '#f4a261', '#4cc9f0', '#06d6a0', '#7209b7', '#ffd60a'];
+  let hash = 0;
+  for (let i = 0; i < String(teamName || '').length; i++) {
+    hash = ((hash << 5) - hash) + String(teamName || '').charCodeAt(i);
+    hash |= 0;
+  }
+  return colors[Math.abs(hash) % colors.length];
+}
+
+function getTeamInitials(teamName) {
+  const words = String(teamName || '').trim().split(/\s+/).filter(Boolean);
+  return words.slice(0, 2).map(word => word[0]).join('').toUpperCase().slice(0, 2) || '?';
+}
+
+function escapeLogoHtml(value) {
+  return String(value || '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+}
+
+function renderTeamLogoChip(team) {
+  const name = team.name || 'Team';
+  const key = name.toLowerCase();
+  const logo = team.logo || LOGO_CACHE[key]?.url || '';
+  const initials = getTeamInitials(name);
+  const color = getTeamColor(name);
+  if (!logo) {
+    return `<div class="logo-chip logo-chip-fallback" style="--team-fallback-color:${color}"><span class="logo-chip-initials">${escapeLogoHtml(initials)}</span></div>`;
+  }
+  return `<div class="logo-chip" style="--team-fallback-color:${color}"><img src="${escapeLogoHtml(wsrv(logo, 80))}" onerror="this.onerror=null;this.style.display=&#39;none&#39;;this.parentElement.classList.add(&#39;logo-chip-fallback&#39;);this.nextElementSibling.style.display=&#39;flex&#39;" alt="${escapeLogoHtml(name)}" style="width:100%;height:100%;object-fit:contain"><span class="logo-chip-initials" style="display:none">${escapeLogoHtml(initials)}</span></div>`;
+}
+
 function renderMatchCard(ev) {
   const ts = ev.startTime ? ev.startTime.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'TBD';
   const sc = STATUS.badgeClass(ev.status);
   const pl = getLog(ev);
-  const sid = encodeURIComponent(String(ev.id));
-  const badge = pl ? '<span class="post-badge ' + (pl.status || 'draft').toLowerCase() + '">' + (pl.status || 'draft') + '</span>' : '';
+  const sid = encodeURIComponent(String(ev.id)).replace(/'/g, '%27');
+  const badge = pl ? `<span class="post-badge ${escapeLogoHtml((pl.status || 'draft').toLowerCase())}">${escapeLogoHtml(pl.status || 'draft')}</span>` : '';
   const thumbBadge = pl?.thumb ? '<span class="thumb-badge">🖼️ Thumb</span>' : '';
-  const hLogo = ev.home.logo || LOGO_CACHE[ev.home.name.toLowerCase()]?.url || '';
-  const aLogo = ev.away.logo || LOGO_CACHE[ev.away.name.toLowerCase()]?.url || '';
-  const hChip = hLogo ? '<div class="logo-chip"><img src="' + wsrv(hLogo, 80) + '" onerror="this.parentElement.textContent=\'' + ev.home.name[0] + '\'" alt="' + ev.home.name + '" style="width:100%;height:100%;object-fit:contain"></div>' : '<div class="logo-chip">' + ev.home.name[0] + '</div>';
-  const aChip = aLogo ? '<div class="logo-chip"><img src="' + wsrv(aLogo, 80) + '" onerror="this.parentElement.textContent=\'' + ev.away.name[0] + '\'" alt="' + ev.away.name + '" style="width:100%;height:100%;object-fit:contain"></div>' : '<div class="logo-chip">' + ev.away.name[0] + '</div>';
-  return '<div class="event-card ' + (pl?.thumb ? 'has-thumb' : '') + ' ' + (pl?.postId ? 'posted' : '') + '" data-id="' + ev.id + '">' +
-    '<div class="ec-top"><span class="ec-league">' + ev.league.icon + ' ' + ev.league.name + '</span><div style="display:flex;align-items:center;gap:4px">' + thumbBadge + badge + '<span class="ec-status ' + sc + '">' + ev.status + '</span></div></div>' +
-    '<div class="ec-match"><div class="ec-team">' + hChip + '<div class="ec-team-name">' + ev.home.name + '</div></div>' +
-    '<div style="display:flex;flex-direction:column;align-items:center"><div class="ec-vs">' + (ev.home.score !== '' ? ev.home.score + ' – ' + ev.away.score : 'vs') + '</div><div class="ec-time">' + ts + '</div></div>' +
-    '<div class="ec-team">' + aChip + '<div class="ec-team-name">' + ev.away.name + '</div></div></div>' +
-    (pl?.postUrl ? '<div style="font-size:.62rem;color:var(--muted2)">📝 <a href="' + pl.postUrl + '" target="_blank" style="color:var(--blue)">View post</a></div>' : '') +
-    '<div class="ec-actions"><button class="btn-red btn-sm" onclick="genAndFill(\'' + sid + '\')">✍️ Gen</button><button class="btn-blue btn-sm" onclick="quickPostEv(\'' + sid + '\')">📤 Post</button><button class="btn-gold btn-sm" onclick="genThumbForEv(\'' + sid + '\')">🖼️ Thumb</button><button class="btn-orange btn-sm" onclick="openHLForEv(\'' + sid + '\')">🎬 HL</button></div></div>';
+  const hChip = renderTeamLogoChip(ev.home);
+  const aChip = renderTeamLogoChip(ev.away);
+  const homeName = escapeLogoHtml(ev.home.name);
+  const awayName = escapeLogoHtml(ev.away.name);
+  const leagueName = escapeLogoHtml(ev.league.name);
+  const leagueIcon = escapeLogoHtml(ev.league.icon);
+  const status = escapeLogoHtml(ev.status);
+  const postLink = pl?.postUrl ? `<div style="font-size:.62rem;color:var(--muted2)">📝 <a href="${escapeLogoHtml(pl.postUrl)}" target="_blank" rel="noopener noreferrer" style="color:var(--blue)">View post</a></div>` : '';
+  const score = ev.home.score !== '' ? `${escapeLogoHtml(ev.home.score)} – ${escapeLogoHtml(ev.away.score)}` : 'vs';
+  return `<div class="event-card ${pl?.thumb ? 'has-thumb' : ''} ${pl?.postId ? 'posted' : ''}" data-id="${escapeLogoHtml(ev.id)}">
+    <div class="ec-top"><span class="ec-league">${leagueIcon} ${leagueName}</span><div style="display:flex;align-items:center;gap:4px">${thumbBadge}${badge}<span class="ec-status ${escapeLogoHtml(sc)}">${status}</span></div></div>
+    <div class="ec-match"><div class="ec-team">${hChip}<div class="ec-team-name">${homeName}</div></div>
+    <div style="display:flex;flex-direction:column;align-items:center"><div class="ec-vs">${score}</div><div class="ec-time">${escapeLogoHtml(ts)}</div></div>
+    <div class="ec-team">${aChip}<div class="ec-team-name">${awayName}</div></div></div>
+    ${postLink}
+    <div class="ec-actions"><button class="btn-red btn-sm" onclick="genAndFill('${sid}')">✍️ Gen</button><button class="btn-blue btn-sm" onclick="quickPostEv('${sid}')">📤 Post</button><button class="btn-gold btn-sm" onclick="genThumbForEv('${sid}')">🖼️ Thumb</button><button class="btn-orange btn-sm" onclick="openHLForEv('${sid}')">🎬 HL</button></div></div>`;
 }
 
 function renderRaceCard(ev) {
