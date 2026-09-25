@@ -2204,6 +2204,15 @@ const EVENT_FIREBASE_EVENTS_PATH = 's803config/todaysMatches';
 const EVENT_FIREBASE_CHANNELS_PATH = 'livetv/channels';
 const EVENT_FIREBASE_POST_LOG_PATH = 's803config/postLog';
 const EVENT_FIREBASE_ONEBALL_PATH = 's803config/oneball';
+const PLAYER_BASE_URL = 'https://sport803.github.io/player/';
+function normalizePlayerBaseUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw || /https?:\/\/sports803\.github\.io\/player\/?/i.test(raw)) return PLAYER_BASE_URL;
+  return raw.replace(/\/?$/, '/');
+}
+function normalizePlayerUrlsInHtml(html) {
+  return String(html || '').replace(/https:\/\/sports803\.github\.io\/player\//gi, PLAYER_BASE_URL);
+}
 
 // ----- STATE -----
 let CFG = {
@@ -2324,6 +2333,8 @@ function migrateRemoveLegacyConfig() {
 function loadAll() {
   migrateRemoveLegacyConfig();
   try { const p = JSON.parse(localStorage.getItem(SK_CFG) || '{}'); if (p.data) CFG = { ...CFG, ...p.data }; } catch(e) {}
+  CFG.playerBase = normalizePlayerBaseUrl(CFG.playerBase);
+  CFG.mediaPlayerBase = normalizePlayerBaseUrl(CFG.mediaPlayerBase);
   try { const p = JSON.parse(localStorage.getItem(SK_CH) || '{}'); channels = p.data?.length ? p.data : DEFAULT_CHANNELS; } catch(e) { channels = [...DEFAULT_CHANNELS]; }
   try { const p = JSON.parse(localStorage.getItem(SK_POST) || '{}'); if (p.data) postLog = p.data; } catch(e) {}
   try { const p = JSON.parse(localStorage.getItem(SK_LOGO) || '{}'); if (p.data) LOGO_CACHE = p.data; } catch(e) {}
@@ -2341,7 +2352,7 @@ function loadAll() {
 }
 
 function persistCFG({ silent = false } = {}) {
-  CFG.blogId = v('cfg-blogid'); CFG.clientId = v('cfg-clientid') || EVENT_BUILTIN_CLIENT_ID; CFG.imgbbKey = v('cfg-imgbb'); CFG.ytApiKey = v('cfg-yt-key'); CFG.playerBase = v('cfg-player') || 'https://sport803.github.io/player/'; CFG.schedTiming = parseInt(document.getElementById('sched-timing')?.value || 60); CFG.schedStatus = document.getElementById('sched-def-status')?.value || 'DRAFT'; CFG.schedInterval = parseInt(document.getElementById('sched-interval')?.value || 300000); CFG.schedThumbs = document.getElementById('sched-thumbs')?.checked || false; CFG.mediaPlayerBase = v('cfg-media-player-base') || 'https://sport803.github.io/player/'; CFG.ppvtvMatchesApi = v('cfg-ppvtv-api') || CFG.ppvtvMatchesApi; CFG.firebaseDatabaseUrl = v('cfg-firebase-url') || EVENT_FIREBASE_DATABASE_URL; CFG.firebaseEventsPath = v('cfg-firebase-events-path') || EVENT_FIREBASE_EVENTS_PATH; CFG.firebaseChannelsPath = v('cfg-firebase-channels-path') || EVENT_FIREBASE_CHANNELS_PATH; CFG.firebasePostLogPath = v('cfg-firebase-post-log-path') || EVENT_FIREBASE_POST_LOG_PATH; CFG.autoFetchStreams = !!document.getElementById('cfg-auto-fetch-streams')?.checked; CFG.enableDdkanqu = !!document.getElementById('cfg-enable-ddkanqu')?.checked; CFG.enableOneTV = !!document.getElementById('cfg-enable-onetv')?.checked; CFG.enablePPVTV = document.getElementById('cfg-enable-ppvtv')?.checked ?? true; CFG.embedStreamsInPost = document.getElementById('cfg-embed-streams-in-post')?.checked ?? true; CFG.ddkanquMappingsRaw = v('cfg-ddkanqu-mappings'); CFG.deepseekKey = v('cfg-deepseek-key'); CFG.deepseekModel = document.getElementById('cfg-deepseek-model')?.value || CFG.deepseekModel; CFG.deepseekTone = v('cfg-deepseek-tone'); CFG.deepseekLength = document.getElementById('cfg-deepseek-length')?.value || CFG.deepseekLength; ddkanquMappings = parseDDKMappings(CFG.ddkanquMappingsRaw); saveAll(); updateClaudeStatus(); if (!silent) toast('Settings saved ✓', 's');
+  CFG.blogId = v('cfg-blogid'); CFG.clientId = v('cfg-clientid') || EVENT_BUILTIN_CLIENT_ID; CFG.imgbbKey = v('cfg-imgbb'); CFG.ytApiKey = v('cfg-yt-key'); CFG.playerBase = normalizePlayerBaseUrl(v('cfg-player')); CFG.schedTiming = parseInt(document.getElementById('sched-timing')?.value || 60); CFG.schedStatus = document.getElementById('sched-def-status')?.value || 'DRAFT'; CFG.schedInterval = parseInt(document.getElementById('sched-interval')?.value || 300000); CFG.schedThumbs = document.getElementById('sched-thumbs')?.checked || false; CFG.mediaPlayerBase = normalizePlayerBaseUrl(v('cfg-media-player-base')); CFG.ppvtvMatchesApi = v('cfg-ppvtv-api') || CFG.ppvtvMatchesApi; CFG.firebaseDatabaseUrl = v('cfg-firebase-url') || EVENT_FIREBASE_DATABASE_URL; CFG.firebaseEventsPath = v('cfg-firebase-events-path') || EVENT_FIREBASE_EVENTS_PATH; CFG.firebaseChannelsPath = v('cfg-firebase-channels-path') || EVENT_FIREBASE_CHANNELS_PATH; CFG.firebasePostLogPath = v('cfg-firebase-post-log-path') || EVENT_FIREBASE_POST_LOG_PATH; CFG.autoFetchStreams = !!document.getElementById('cfg-auto-fetch-streams')?.checked; CFG.enableDdkanqu = !!document.getElementById('cfg-enable-ddkanqu')?.checked; CFG.enableOneTV = !!document.getElementById('cfg-enable-onetv')?.checked; CFG.enablePPVTV = document.getElementById('cfg-enable-ppvtv')?.checked ?? true; CFG.embedStreamsInPost = document.getElementById('cfg-embed-streams-in-post')?.checked ?? true; CFG.ddkanquMappingsRaw = v('cfg-ddkanqu-mappings'); CFG.deepseekKey = v('cfg-deepseek-key'); CFG.deepseekModel = document.getElementById('cfg-deepseek-model')?.value || CFG.deepseekModel; CFG.deepseekTone = v('cfg-deepseek-tone'); CFG.deepseekLength = document.getElementById('cfg-deepseek-length')?.value || CFG.deepseekLength; ddkanquMappings = parseDDKMappings(CFG.ddkanquMappingsRaw); saveAll(); updateClaudeStatus(); if (!silent) toast('Settings saved ✓', 's');
 }
 
 function saveCFG() {
@@ -2349,12 +2360,12 @@ function saveCFG() {
   CFG.clientId = v('cfg-clientid') || EVENT_BUILTIN_CLIENT_ID;
   CFG.imgbbKey = v('cfg-imgbb');
   CFG.ytApiKey = v('cfg-yt-key');
-  CFG.playerBase = v('cfg-player') || 'https://sport803.github.io/player/';
+  CFG.playerBase = normalizePlayerBaseUrl(v('cfg-player'));
   CFG.schedTiming = parseInt(document.getElementById('sched-timing')?.value || 60);
   CFG.schedStatus = document.getElementById('sched-def-status')?.value || 'DRAFT';
   CFG.schedInterval = parseInt(document.getElementById('sched-interval')?.value || 300000);
   CFG.schedThumbs = document.getElementById('sched-thumbs')?.checked || false;
-  CFG.mediaPlayerBase = v('cfg-media-player-base') || 'https://sport803.github.io/player/';
+  CFG.mediaPlayerBase = normalizePlayerBaseUrl(v('cfg-media-player-base'));
   CFG.ppvtvMatchesApi = v('cfg-ppvtv-api') || 'https://august.ppvtv.icu/api/matches.json';
   CFG.firebaseDatabaseUrl = v('cfg-firebase-url') || EVENT_FIREBASE_DATABASE_URL;
   CFG.firebaseEventsPath = v('cfg-firebase-events-path') || EVENT_FIREBASE_EVENTS_PATH;
@@ -4365,7 +4376,7 @@ async function getAllStreamSourcesForEvent(ev) {
 
 function buildSports803PlayerUrl(sources) {
   if (!sources || !sources.length) return '';
-  const base = (CFG.mediaPlayerBase || 'https://sport803.github.io/player/').replace(/\/$/, '');
+  const base = normalizePlayerBaseUrl(CFG.mediaPlayerBase);
   const one = sources.find(s => s.type === 'one' || s.type === 'm3u8');
   const mora = sources.find(s => s.type === 'mora' || s.type === 'hls');
   const embeds = sources.filter(s => s.type === 'embed');
@@ -4730,7 +4741,7 @@ function canonicalOneBallReplayUrl(url) {
   } catch (e) {}
   return raw.replace(/\/\/+/, '/').replace('https:/', 'https://');
 }
-function playerBaseUrl() { return (CFG.playerBase || 'https://sport803.github.io/player/').replace(/\/?$/, '/') ; }
+function playerBaseUrl() { return normalizePlayerBaseUrl(CFG.playerBase); }
 function buildHighlightsPlayerIframe(url) {
   if (!url) return '';
   const replay = canonicalOneBallReplayUrl(url);
@@ -5873,6 +5884,8 @@ function saveLogoOverrides() {
 }
 
 function applyConfigToUI() {
+  CFG.playerBase = normalizePlayerBaseUrl(CFG.playerBase);
+  CFG.mediaPlayerBase = normalizePlayerBaseUrl(CFG.mediaPlayerBase);
   set('cfg-blogid', CFG.blogId);
   renderBloggerBlogs();
   set('cfg-clientid', CFG.clientId);
@@ -5976,8 +5989,8 @@ document.addEventListener('DOMContentLoaded', () => {
   window.getLabels=function(ev){const base={ucl:['UEFA Champions League','UCL','Football Live Stream','Sports 803'],epl:['Premier League','EPL','Football Live Stream','Sports 803'],laliga:['La Liga','Spanish Football','Football Live Stream','Sports 803'],seriea:['Serie A','Italian Football','Sports 803'],bundesliga:['Bundesliga','German Football','Sports 803'],f1:['Formula 1','F1','Grand Prix','Sports 803'],nba:['NBA','Basketball','Sports 803'],nfl:['NFL','American Football','Sports 803'],ufc:['UFC','MMA','Sports 803']}[ev.league?.id]||['Sports 803'];return [...new Set([...base,'s803:'+evKey(ev),...(ev.home?.name?[ev.home.name]:[]),...(ev.away?.name?[ev.away.name]:[])])];};
   window.STATUS={isFinal:s=>/\b(final|ft|full[\s-]?time|ended|finished|completed|aet|penalties|post[\s-]?match)\b/i.test(s||''),isLive:s=>/\b(in[\s-]?progress|live|halftime|half[\s-]?time|1st half|2nd half|end of regulation|overtime|ot)\b/i.test(s||''),isDead:s=>/\b(postponed|cancel(l)?ed|suspended|abandoned|delayed)\b/i.test(s||''),isSched:s=>!STATUS.isFinal(s)&&!STATUS.isLive(s)&&!STATUS.isDead(s),badgeClass:s=>STATUS.isLive(s)?'live':STATUS.isFinal(s)?'final':STATUS.isDead(s)?'dead':'sched',label:s=>s||'Scheduled'};
   window.fetchPostBody=async function(postId){if(!accessToken||!CFG.blogId)return null;const id=extractPostIdFromUrl(postId)||await resolvePostUrlToId(postId);if(!id)return null;try{const r=await fetch('https://www.googleapis.com/blogger/v3/blogs/'+CFG.blogId+'/posts/'+id,{headers:{Authorization:'Bearer '+accessToken}});if(!r.ok)throw Error('HTTP '+r.status);const d=await r.json();return {id:d.id,title:d.title||'',content:d.content||'',labels:d.labels||[],url:d.url||''};}catch(e){console.warn('[fetchPostBody]',e.message);return null;}};
-  window.postRaw=async function(title,html,status,labels,publishDate=null){if(!CFG.blogId||!accessToken)return null;let url='https://www.googleapis.com/blogger/v3/blogs/'+CFG.blogId+'/posts/'+(status==='LIVE'?'':'?isDraft=true');let r,last; for(let attempt=0;attempt<4;attempt++){try{r=await fetch(url,{method:'POST',headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},body:JSON.stringify({kind:'blogger#post',blog:{id:CFG.blogId},title,content:html,labels:labels||['Sports 803'],searchDescription:(ensureSearchDescription(title,html)||makeSearchDescription(title,html)).slice(0,150),...(publishDate&&status==='LIVE'?{published:publishDate}:{})})}); if(r.ok)return r.json(); last=r.status; if(![429,500,502,503,504].includes(r.status))break; await new Promise(x=>setTimeout(x,1000*Math.pow(2,attempt)));}catch(e){last=e.message;await new Promise(x=>setTimeout(x,1000*Math.pow(2,attempt)));}} toast('Post failed after retries: Blogger '+last,'e'); return null;};
-  window.updateExistingPost=async function(ev,title,html,status,labels,publishDate=null){const pl=ev?getLog(ev):null,id=editingPostId||pl?.postId;if(!id){toast('No post ID to update','e');return null}const body={kind:'blogger#post',id,blog:{id:CFG.blogId},title,content:html,labels:labels||[],searchDescription:(ensureSearchDescription(title,html)||makeSearchDescription(title,html)).slice(0,150),...(publishDate&&status==='LIVE'?{published:publishDate}:{})};let r,last;for(let attempt=0;attempt<4;attempt++){try{r=await fetch('https://www.googleapis.com/blogger/v3/blogs/'+CFG.blogId+'/posts/'+id,{method:'PUT',headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},body:JSON.stringify(body)});if(r.ok){const p=await r.json();if(ev)setLog(ev,{postId:p.id,postUrl:p.url,status,title,league:ev.league?.name});toast('Post updated ✓','s');return p}last=r.status;if(![429,500,502,503,504].includes(r.status))break;await new Promise(x=>setTimeout(x,1000*Math.pow(2,attempt)));}catch(e){last=e.message;await new Promise(x=>setTimeout(x,1000*Math.pow(2,attempt)));}}toast('Update failed after retries: Blogger '+last,'e');return null;};
+  window.postRaw=async function(title,html,status,labels,publishDate=null){if(!CFG.blogId||!accessToken)return null;let url='https://www.googleapis.com/blogger/v3/blogs/'+CFG.blogId+'/posts/'+(status==='LIVE'?'':'?isDraft=true');let r,last; for(let attempt=0;attempt<4;attempt++){try{r=await fetch(url,{method:'POST',headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},body:JSON.stringify({kind:'blogger#post',blog:{id:CFG.blogId},title,content:normalizePlayerUrlsInHtml(html),labels:labels||['Sports 803'],searchDescription:(ensureSearchDescription(title,html)||makeSearchDescription(title,html)).slice(0,150),...(publishDate&&status==='LIVE'?{published:publishDate}:{})})}); if(r.ok)return r.json(); last=r.status; if(![429,500,502,503,504].includes(r.status))break; await new Promise(x=>setTimeout(x,1000*Math.pow(2,attempt)));}catch(e){last=e.message;await new Promise(x=>setTimeout(x,1000*Math.pow(2,attempt)));}} toast('Post failed after retries: Blogger '+last,'e'); return null;};
+  window.updateExistingPost=async function(ev,title,html,status,labels,publishDate=null){const pl=ev?getLog(ev):null,id=editingPostId||pl?.postId;if(!id){toast('No post ID to update','e');return null}const body={kind:'blogger#post',id,blog:{id:CFG.blogId},title,content:normalizePlayerUrlsInHtml(html),labels:labels||[],searchDescription:(ensureSearchDescription(title,html)||makeSearchDescription(title,html)).slice(0,150),...(publishDate&&status==='LIVE'?{published:publishDate}:{})};let r,last;for(let attempt=0;attempt<4;attempt++){try{r=await fetch('https://www.googleapis.com/blogger/v3/blogs/'+CFG.blogId+'/posts/'+id,{method:'PUT',headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},body:JSON.stringify(body)});if(r.ok){const p=await r.json();if(ev)setLog(ev,{postId:p.id,postUrl:p.url,status,title,league:ev.league?.name});toast('Post updated ✓','s');return p}last=r.status;if(![429,500,502,503,504].includes(r.status))break;await new Promise(x=>setTimeout(x,1000*Math.pow(2,attempt)));}catch(e){last=e.message;await new Promise(x=>setTimeout(x,1000*Math.pow(2,attempt)));}}toast('Update failed after retries: Blogger '+last,'e');return null;};
   // Preserve the v9 search implementation under a private alias, then add canonical persistence.
   const originalSearch=searchOneBallHighlights;
   window.searchOneBallHighlights=async function(ev){const r=await originalSearch(ev);if(r){const replayUrl=r.replayUrl||r.replayPageUrl||'',oneMatchId=r.matchId||extractReplayId(replayUrl);setLog(ev,{hasHL:true,hlUrl:oneBallPlayerUrl(oneMatchId,'replay'),replayUrl,oneMatchId,hlCanonical:replayUrl.split('?')[0],hlFetchedAt:Date.now()});}return r;};
