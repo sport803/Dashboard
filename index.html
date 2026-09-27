@@ -2615,9 +2615,13 @@ const Compose = {
 
   // ----- Auto-fill all sections -----
   fillAllSections() {
-    const sections = ['overview', 'details', 'form', 'h2h', 'keyPlayers', 'analysis', 'stats', 'cta'];
-    sections.forEach(s => this.insertSection(s));
-    toast('All sections filled ✓', 's');
+    const body = document.getElementById('post-body');
+    const ev = currentComposeEv;
+    if (!ev) { toast('No event loaded. Use ✍️ Gen from Events first.', 'w'); return; }
+    const mode = document.getElementById('c-mode')?.value === 'highlights' ? 'highlights' : 'preview';
+    body.value = ensureAutoFilledArticleSections(body.value, ev, mode);
+    updateSEO();
+    toast('All article sections filled ✓', 's');
   }
 };
 
@@ -3297,14 +3301,17 @@ function parseTitle(title) {
 
 function normaliseNationalTeamName(name) {
   let value = zhToEn(String(name || '')).normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/[’'\.]/g, '').replace(/[–—-]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+    .replace(/[’'\.]/g, '').replace(/[&+]/g, ' and ').replace(/[–—-]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
   const aliases = {
     'türkiye': 'turkiye', 'turkey': 'turkiye', 'bosnia herzegovina': 'bosnia and herzegovina',
     'bosnia and herzegovina': 'bosnia and herzegovina', 'n ireland': 'northern ireland',
     'northern ireland': 'northern ireland', 'czech republic': 'czechia', 'czechia': 'czechia',
     'united states': 'usa', 'usa': 'usa', 'us': 'usa', 'south korea': 'south korea',
     'korea republic': 'south korea', 'ivory coast': 'ivory coast', 'cote d ivoire': 'ivory coast',
-    'cote divoire': 'ivory coast'
+    'cote divoire': 'ivory coast', 'trinidad tobago': 'trinidad and tobago',
+    'dominican rep': 'dominican republic', 'dominican republic': 'dominican republic',
+    'naoya inoue': 'inoue', 'inoue naoya': 'inoue', 'tenshin nasukawa': 'nasukawa', 'tenshin nasukawa 2': 'nasukawa',
+    'tenshin': 'nasukawa', 'n t nasukawa': 'nasukawa', 'nasukawa 2': 'nasukawa'
   };
   value = aliases[value] || value;
   return value.replace(/\s+[abcd]$/i, '').replace(/\s+/g, ' ').trim();
@@ -3314,6 +3321,54 @@ function pairKey(a, b) {
     .replace(/\b(fc|afc|rfc|sc|cf|ac|as|bsc|rcd|rc|vfb|vfl|1\.fc|real|deportivo|ca|cf|athletic|clube|club|c\.f\.|f\.c\.|c\.a\.|st|st\.|city|united|town|rovers|wanderers|albion|athletic|hotspur|villa|forest|palace|wolves|celtic|rangers)\b/g, '')
     .replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
   return [norm(a), norm(b)].sort((x, y) => x.localeCompare(y, 'en', { sensitivity: 'base' })).join('|');
+}
+
+// Stable known OneBall pages for events whose names are not exposed consistently
+// by ESPN and list.json. These are fallback links only; list.json remains primary.
+const ONEBALL_MATCH_OVERRIDES = {
+  [pairKey('Inoue', 'Nasukawa')]: '29473',
+  [pairKey('Trinidad and Tobago', 'Dominican Republic')]: '4642662'
+};
+
+function articleHasHeading(html, labels) {
+  const pattern = labels.map(label => label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  return new RegExp('<h[1-6][^>]*>[^<]*(' + pattern + ')[^<]*</h[1-6]>', 'i').test(String(html || ''));
+}
+function buildAutoFilledArticleSections(ev, mode = 'preview') {
+  if (!ev) return '';
+  const h = ev.home?.name || ev.name || 'Home';
+  const a = ev.away?.name || '';
+  const league = ev.league?.name || 'today’s event';
+  const kickoff = ev.startTime ? ev.startTime.toLocaleString() : 'the scheduled time';
+  const score = ev.home?.score !== '' && ev.home?.score != null ? ev.home.score + '–' + (ev.away?.score ?? '') : '';
+  const isHighlight = mode === 'highlights';
+  const sections = isHighlight ? [
+    [['Match Overview', 'Match Summary'], '<h2>Match Overview</h2><p>' + h + (a ? ' vs ' + a : '') + ' featured in ' + league + '. This highlights article brings together the match context, the decisive passages, and the replay so readers can follow the story of the event from the opening phase to the final whistle.</p>'],
+    [['Match Details'], '<h2>Match Details</h2><p><strong>Event:</strong> ' + h + (a ? ' vs ' + a : '') + '<br><strong>Competition:</strong> ' + league + '<br><strong>Scheduled:</strong> ' + kickoff + (score ? '<br><strong>Score:</strong> ' + score : '') + '</p>'],
+    [['Key Moments', 'Highlights'], '<h2>Key Moments</h2><p>The key moments came from changes in tempo, chances created in dangerous areas, defensive recoveries, and the sequences that changed the momentum. Watch the highlights to see how each important passage developed in context.</p>'],
+    [['Standout Performers', 'Key Players'], '<h2>Standout Performers</h2><p>Players who carried the ball forward, created openings, defended dangerous situations, or delivered important set pieces shaped the contest. The replay provides the clearest way to review those individual contributions and the decisions behind them.</p>'],
+    [['Tactical Review', 'Match Analysis'], '<h2>Tactical Review</h2><p>The tactical picture was shaped by pressing intensity, spacing between the lines, transitions, and the way each side responded after losing possession. Reviewing the full sequence helps explain more than the final score alone.</p>'],
+    [['What the Result Means', 'What This Result Means'], '<h2>What the Result Means</h2><p>This result will influence confidence and preparation for the next round of fixtures. ' + h + ' and ' + (a || 'the opposition') + ' can use the performance to identify the spells that worked best and the moments that need improvement.</p>'],
+    [['How to Watch'], '<h2>How to Watch</h2><p>Use the embedded Sports 803 player and the replay link in this article to revisit the main action. The page is designed to provide useful event context alongside the video rather than offering only a thin player link.</p>'],
+    [['Frequently Asked Questions', 'FAQ'], '<h2>Frequently Asked Questions</h2><p><strong>Where can I watch ' + h + (a ? ' vs ' + a : '') + '?</strong><br>Return to this Sports 803 article for the latest stream, replay, kickoff, and event information.</p>']
+  ] : [
+    [['Match Overview'], '<h2>Match Overview</h2><p>' + h + (a ? ' take on ' + a : '') + ' in ' + league + '. This article covers the event context, the main storylines, and the viewing information readers need before the action begins.</p>'],
+    [['Match Details'], '<h2>Match Details</h2><p><strong>Event:</strong> ' + h + (a ? ' vs ' + a : '') + '<br><strong>Competition:</strong> ' + league + '<br><strong>Kickoff:</strong> ' + kickoff + '</p>'],
+    [['Recent Form', 'Team Form'], '<h2>Team Form</h2><p>' + h + ' will aim to turn preparation and recent performances into a strong start, while ' + (a || 'the opposition') + ' will look for the same. Lineups, availability, confidence, and the quality of recent chances will all shape the form picture around this event.</p>'],
+    [['Head-to-Head'], '<h2>Head-to-Head</h2><p>The history between these sides adds context to the occasion, but current form and match-day execution remain decisive. Previous meetings can reveal recurring tactical patterns, set-piece opportunities, and areas where either team may try to gain an advantage.</p>'],
+    [['Key Players', 'Key Players to Watch'], '<h2>Key Players to Watch</h2><p>Watch for the players who can create separation, progress possession, win duels, and make the final pass. ' + h + ' will need its main contributors to make good decisions, while ' + (a || 'the opposition') + ' will look for individual moments to change the game.</p>'],
+    [['Match Analysis', 'Tactical Analysis'], '<h2>Match Analysis</h2><p>Expect a tactical contest built around possession, pressing, defensive shape, and transitions. The team that manages space between the lines and reacts best after turnovers should create the clearest openings.</p>'],
+    [['How to Watch'], '<h2>How to Watch</h2><p>Follow this Sports 803 article for the latest event details and use the embedded player when the stream is available. No sign-up is required to check the viewing information and match updates.</p>'],
+    [['Frequently Asked Questions', 'FAQ'], '<h2>Frequently Asked Questions</h2><p><strong>When is the event?</strong><br>The latest scheduled time is listed in the Match Details section. <strong>Where can I watch?</strong><br>Use the Sports 803 player and stream information attached to this article.</p>']
+  ];
+  return sections;
+}
+function ensureAutoFilledArticleSections(body, ev, mode = 'preview') {
+  let html = String(body || '').trim();
+  for (const [labels, section] of buildAutoFilledArticleSections(ev, mode)) {
+    if (!articleHasHeading(html, labels)) html += (html ? '\n\n' : '') + section;
+  }
+  return html;
 }
 
 // ============================================================
@@ -3938,7 +3993,7 @@ async function genAndFill(sid) {
     const existing = await fetchPostBody(pl.postId);
     if (existing) {
       set('post-title', fin ? title : existing.title || title);
-      document.getElementById('post-body').value = existing.content || '';
+      document.getElementById('post-body').value = ensureAutoFilledArticleSections(existing.content || '', ev, fin ? 'highlights' : 'preview');
       document.getElementById('post-labels').value = (existing.labels || []).join(', ');
       if (pl.thumb) set('compose-thumb-url', pl.thumb.startsWith('http') ? pl.thumb : '');
       setEditMode(pl.postId, evKey(ev), pl.postUrl || '#');
@@ -4097,7 +4152,7 @@ async function bulkPostHighlights() {
       const playerUrl=oneBallPlayerUrl(oneMatchId,'replay');
       if (!found?.playerUrl && !playerUrl) { failed++; continue; }
       const title=ev.home.name+' vs '+ev.away.name+' – Highlights & Replay | Sports 803';
-      const body=await buildArticleWithClaude(title,ev,true);
+      const body=ensureAutoFilledArticleSections(await buildArticleWithClaude(title,ev,true),ev,'highlights');
       const html=body+'\n\n'+buildHighlightsPlayerIframe(playerUrl);
       const post=pl?.postId ? await updateExistingPost(ev,title,html,CFG.schedStatus||'DRAFT',getLabels(ev)) : await postRaw(title,html,CFG.schedStatus||'DRAFT',getLabels(ev));
       if (!post) { failed++; if(failed>=3){toast('Bulk highlights stopped after 3 failures','e');break;} continue; }
@@ -4337,7 +4392,13 @@ function getChannelsForEvent(ev) {
 function getOneTVSourcesForEvent(ev) {
   if (!CFG.enableOneTV) return [];
   const key = pairKey(ev.home?.name || '', ev.away?.name || '');
-  return oneTVHomeMap[key] || [];
+  if (oneTVHomeMap[key]?.length) return oneTVHomeMap[key];
+  const overrideId = ONEBALL_MATCH_OVERRIDES[key];
+  if (overrideId) {
+    const liveUrl = oneBallUrlFor(overrideId, 'live');
+    return [{ url: liveUrl, type: 'one', source: 'onetv', matchId: overrideId, liveUrl, home: ev.home?.name || '', away: ev.away?.name || '' }];
+  }
+  return [];
 }
 
 function getPPVTVSourcesForEvent(ev) {
@@ -4462,6 +4523,10 @@ function oneBallSignalUrl(signal) {
   const url = signal?.url || signal?.src || signal?.stream_url || signal?.streamUrl || '';
   return String(url).trim();
 }
+function oneBallTeamName(value) {
+  if (value && typeof value === 'object') return String(value.name || value.team_name || value.teamName || value.title || '').trim();
+  return String(value || '').trim();
+}
 function addOneTVSource(key, source) {
   if (!key || !source?.url) return;
   if (!oneTVHomeMap[key]) oneTVHomeMap[key] = [];
@@ -4469,8 +4534,8 @@ function addOneTVSource(key, source) {
 }
 function addOneBallEntry(entry) {
   const matchId = String(entry?.nami_id || entry?.id || '').trim();
-  const home = zhToEn(entry?.home_team || entry?.home || '');
-  const away = zhToEn(entry?.away_team || entry?.away || '');
+  const home = zhToEn(oneBallTeamName(entry?.home_team || entry?.home_team_name || entry?.home || entry?.homeName || ''));
+  const away = zhToEn(oneBallTeamName(entry?.away_team || entry?.away_team_name || entry?.away || entry?.awayName || ''));
   if (!matchId || !home || !away) return null;
   const key = pairKey(home, away);
   const liveUrl = 'https://oneball.live/live/' + matchId + '.html';
@@ -4577,7 +4642,7 @@ async function loadOneTVStreams() {
 function debugOneBallMatch(homeName, awayName) {
   const key = pairKey(homeName, awayName);
   const sources = oneTVHomeMap[key] || [];
-  const entry = oneBallListEntries.find(item => pairKey(item?.home_team || item?.home, item?.away_team || item?.away) === key);
+  const entry = oneBallListEntries.find(item => pairKey(oneBallTeamName(item?.home_team || item?.home), oneBallTeamName(item?.away_team || item?.away)) === key);
   console.group('[OneBall] ' + homeName + ' vs ' + awayName);
   console.log('pairKey:', key);
   console.log('oneTVHomeMap[key]:', sources.length ? sources : '(missing)');
@@ -5259,10 +5324,10 @@ async function genHLText() {
   try {
     const prompt = buildClaudePrompt(title, ev, true);
     const article = await callClaude(prompt);
-    body.value = article;
+    body.value = ensureAutoFilledArticleSections(article, ev, 'highlights');
     toast('Highlights text generated ✓', 's');
   } catch (e) {
-    body.value = '<h2>' + title + ' Highlights</h2><p>A dramatic encounter that delivered on all fronts. Both teams gave their all, and the result reflects the fine margins at this level.</p>';
+    body.value = ensureAutoFilledArticleSections('<h2>' + title + ' Highlights</h2><p>A dramatic encounter that delivered on all fronts. Both teams gave their all, and the result reflects the fine margins at this level.</p>', ev, 'highlights');
     toast('Fallback text generated', 's');
   }
 }
@@ -5272,12 +5337,13 @@ async function postHighlights() {
   if (isNaN(idx)) { toast('Select an event', 'i'); return; }
   const ev = allEvents[idx];
   if (!ev) return;
-  const body = document.getElementById('hl-body').value.trim();
+  const body = ensureAutoFilledArticleSections(document.getElementById('hl-body').value.trim(), ev, 'highlights');
   if (!body) { toast('Write/generate text first', 'i'); return; }
   if (!accessToken || !CFG.blogId) { toast('Sign in and set Blog ID', 'e'); return; }
   const label = ev.type === 'race' ? ev.name : ev.home.name + ' vs ' + ev.away.name;
   const title = label + ' – Highlights & Replay | Sports 803';
   const video = v('hl-video');
+  document.getElementById('hl-body').value = body;
   const iframeHtml = video ? buildHighlightsPlayerIframe(video) : '';
   let thumbHtml = '';
   const preUploadedUrl = v('hl-thumb-url');
@@ -5318,7 +5384,7 @@ async function postHighlights() {
       const res = await fetch('https://www.googleapis.com/blogger/v3/blogs/' + CFG.blogId + '/posts/' + resolvedPostId, {
         method: 'PUT',
         headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kind: 'blogger#post', id: resolvedPostId, blog: { id: CFG.blogId }, title, content: html, labels: getLabels(ev) })
+        body: JSON.stringify({ kind: 'blogger#post', id: resolvedPostId, blog: { id: CFG.blogId }, title, content: normalizePlayerUrlsInHtml(html), labels: getLabels(ev) })
       });
       if (!res.ok) throw new Error('HTTP ' + res.status + ': ' + await res.text());
       const post = await res.json();
@@ -5751,7 +5817,8 @@ function previewPost() { document.getElementById('preview-title').textContent = 
 // ============================================================
 const oneBallEmbedWarnings = new Set();
 async function buildArticleWithStreams(title, ev, isHighlights = false) {
-  const base = await buildArticleWithClaude(title, ev, isHighlights);
+  const generated = await buildArticleWithClaude(title, ev, isHighlights);
+  const base = ev ? ensureAutoFilledArticleSections(generated, ev, isHighlights ? 'highlights' : 'preview') : generated;
   if (!ev) return base;
   if (CFG.embedStreamsInPost === false) {
     const oneSources = getOneTVSourcesForEvent(ev);
