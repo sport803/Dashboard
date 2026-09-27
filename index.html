@@ -3945,7 +3945,7 @@ function renderMatchCard(ev) {
     <div style="display:flex;flex-direction:column;align-items:center"><div class="ec-vs">${score}</div><div class="ec-time">${escapeLogoHtml(ts)}</div></div>
     <div class="ec-team">${aChip}<div class="ec-team-name">${awayName}</div></div></div>
     ${postLink}
-    <div class="ec-actions"><button class="btn-red btn-sm" onclick="genAndFill('${sid}')">✍️ Gen</button><button class="btn-blue btn-sm" onclick="quickPostEv('${sid}')">📤 Post</button><button class="btn-gold btn-sm" onclick="genThumbForEv('${sid}')">🖼️ Thumb</button><button class="btn-orange btn-sm" onclick="openHLForEv('${sid}')">🎬 HL</button></div></div>`;
+    <div class="ec-actions"><button class="btn-red btn-sm" onclick="genAndFill('${sid}')">✍️ Gen</button><button class="btn-blue btn-sm" onclick="quickPostEv('${sid}')">📤 Post</button><button class="btn-gold btn-sm" onclick="genThumbForEv('${sid}')">🖼️ Thumb</button><button class="btn-orange btn-sm" onclick="quickPostHighlights('${sid}')">🎬 HL</button></div></div>`;
 }
 
 function renderRaceCard(ev) {
@@ -4876,6 +4876,16 @@ async function fetchOneBallPage(url, timeoutMs=15000) {
 }
 async function searchOneBallHighlights(ev) {
   if(!ev)return null; const home=ev.home?.name||'',away=ev.away?.name||''; toast('Searching OneBall Replay: '+home+' vs '+away+'…','i');
+  const overrideKey = typeof pairKey === 'function' ? pairKey(home, away) : '';
+  const overrideId = typeof ONEBALL_MATCH_OVERRIDES !== 'undefined' ? ONEBALL_MATCH_OVERRIDES[overrideKey] : '';
+  if (overrideId) {
+    const canonical = oneBallUrlFor(overrideId, 'replay');
+    const playerUrl = oneBallPlayerUrl(overrideId, 'replay');
+    const result = { url: playerUrl, playerUrl, replayUrl: canonical, replayPageUrl: canonical, matchId: String(overrideId), title: home + ' vs ' + away + ' Highlights' };
+    persistOneBallLookup(String(overrideId), { replayUrl: canonical, home, away });
+    setLog(ev, { hasHL: true, hlUrl: playerUrl, replayUrl: canonical, oneMatchId: String(overrideId), hlCanonical: canonical, hlFetchedAt: Date.now() });
+    return result;
+  }
   const listHtml=await fetchOneBallPage('https://oneball.live/replay/'); if(!listHtml){toast('Could not fetch OneBall Replay list','e');return null;}
   const doc=new DOMParser().parseFromString(listHtml,'text/html'); let matchUrl='';
   const links=[...doc.querySelectorAll('a[href]')]; for(const a of links){if(oneBallMatchFound(a.textContent+' '+a.getAttribute('href'),home,away)){try{matchUrl=new URL(a.getAttribute('href'), 'https://oneball.live').href}catch(e){} if(matchUrl)break;}}
@@ -4888,6 +4898,43 @@ async function searchOneBallHighlights(ev) {
   return result;
 }
 async function oneBallSearchAndFill(sid){const ev=sid?findEv(sid):currentComposeEv;if(!ev){toast('No event selected','w');return}const r=await searchOneBallHighlights(ev);if(!r)return;set('highlights-video-url',r.playerUrl);updateHighlightsPlayer();const b=document.getElementById('post-body');b.value=stripInjectedBlocks(b.value);b.value+=(b.value?'\n\n':'')+buildHighlightsPlayerIframe(r.playerUrl);set('hl-video',r.playerUrl);updateSEO();toast('✓ OneBall Replay found and saved','s');}
+async function quickPostHighlights(sid) {
+  const ev = findEv(sid);
+  if (!ev) { toast('Event not found', 'e'); return; }
+  if (ev.type === 'race') { toast('Highlights are available for matches only', 'w'); return; }
+  if (!accessToken || !CFG.blogId) { toast('Sign in and set Blog ID first', 'e'); return; }
+  const button = document.querySelector('.event-card[data-id="' + String(ev.id).replace(/"/g, '\\"') + '"] .btn-orange');
+  if (button) { button.disabled = true; button.dataset.originalText = button.textContent; button.textContent = '⏳ HL…'; }
+  try {
+    const found = await searchOneBallHighlights(ev);
+    if (!found) return;
+    const title = ev.home.name + ' vs ' + ev.away.name + ' – Highlights & Replay | Sports 803';
+    toast('Writing full highlights article…', 'i');
+    const generated = await buildArticleWithClaude(title, ev, true);
+    const body = ensureAutoFilledArticleSections(generated, ev, 'highlights');
+    const html = body + '\n\n' + buildHighlightsPlayerIframe(found.playerUrl || found.replayUrl);
+    const pl = getLog(ev);
+    let post;
+    if (pl?.postId) {
+      toast('Updating existing highlights post…', 'i');
+      post = await updateExistingPost(ev, title, html, pl.status || 'LIVE', getLabels(ev), pl.scheduledFor || null);
+    } else {
+      toast('Posting highlights automatically…', 'i');
+      post = await postRaw(title, html, 'LIVE', getLabels(ev), null);
+    }
+    if (post) {
+      setLog(ev, { postId: post.id, postUrl: post.url, title, hasHL: true, status: 'LIVE', hlUrl: found.playerUrl || '', replayUrl: found.replayUrl || '', oneMatchId: found.matchId || null });
+      renderEventCards(allEvents);
+      toast('Highlights found and posted automatically ✓', 's');
+    }
+  } catch (e) {
+    console.error('[quickPostHighlights]', e);
+    toast('Quick highlights post failed: ' + (e.message || e), 'e');
+  } finally {
+    if (button && document.body.contains(button)) { button.disabled = false; button.textContent = button.dataset.originalText || '🎬 HL'; }
+  }
+}
+
 async function oneBallSearchForModal(){const ev=allEvents[parseInt(v('hl-select'))];if(!ev){toast('Select an event first','w');return}const r=await searchOneBallHighlights(ev);if(r){set('hl-video',r.playerUrl);onHLSelect();toast('✓ OneBall Replay found: '+r.title,'s')}}
 async function fetchAllOneBallHighlights(){const fin=allEvents.filter(ev=>STATUS.isFinal(ev.status));if(!fin.length){toast('No finished events found to fetch highlights for.','w');return}toast('Starting OneBall search for '+fin.length+' events…','i');let found=0;for(const ev of fin){if(await searchOneBallHighlights(ev))found++;await new Promise(r=>setTimeout(r,500))}renderEventCards(allEvents);toast('OneBall search complete. Found '+found+' replay(s).','s')}
 
