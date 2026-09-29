@@ -4297,7 +4297,7 @@ function buildIframe(urls) {
   const base = (v('player-base') || CFG.playerBase).trim();
   const params = urls.map(u => 'mora=' + encodeURIComponent(u)).join('&');
   const src = params ? base + '?' + params : base;
-  return '<div style="margin:18px 0"><iframe loading="lazy" sandbox="allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-top-navigation" allow="encrypted-media" width="100%" height="500" src="' + src + '" frameborder="0" scrolling="no" allowfullscreen></iframe></div>';
+  return '<div style="margin:18px 0"><iframe loading="lazy"  allow="encrypted-media" width="100%" height="500" src="' + src + '" frameborder="0" scrolling="no" allowfullscreen></iframe></div>';
 }
 
 function updateIframeBox() {
@@ -4451,7 +4451,7 @@ function buildSports803PlayerUrl(sources) {
 function buildMultiSourceIframe(sources) {
   const src = buildSports803PlayerUrl(sources);
   if (!src) return '';
-  return '<div style="margin:18px 0;position:relative;padding-bottom:56.25%;height:0;overflow:hidden"><iframe loading="lazy" sandbox="allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-top-navigation" allow="encrypted-media" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0" src="' + src + '" frameborder="0" scrolling="no" allowfullscreen></iframe></div>';
+  return '<div style="margin:18px 0;position:relative;padding-bottom:56.25%;height:0;overflow:hidden"><iframe loading="lazy"  allow="encrypted-media" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0" src="' + src + '" frameborder="0" scrolling="no" allowfullscreen></iframe></div>';
 }
 
 // ----- DDKanqu Scraper (with better timeout) -----
@@ -5078,7 +5078,7 @@ function buildRacePlayerIframe(race) {
     return type === 'one' ? 'one=' + s.url : type + '=' + encodeURIComponent(s.url);
   }).join('&');
   const src = playerBase + '?' + params;
-  return '<div style="margin:18px 0;position:relative;padding-bottom:56.25%;height:0;overflow:hidden"><iframe loading="lazy" sandbox="allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-top-navigation" allow="encrypted-media" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0" src="' + src + '" frameborder="0" scrolling="no" allowfullscreen width="100%" height="500"></iframe></div>';
+  return '<div style="margin:18px 0;position:relative;padding-bottom:56.25%;height:0;overflow:hidden"><iframe loading="lazy"  allow="encrypted-media" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0" src="' + src + '" frameborder="0" scrolling="no" allowfullscreen width="100%" height="500"></iframe></div>';
 }
 
 function renderFullRaces(races) {
