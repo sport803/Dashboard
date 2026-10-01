@@ -13,7 +13,7 @@ Every five minutes, the workflow:
 5. After the event is final, updates that same post with a highlights/replay article and result.
 6. Uses the Dashboard-style article sections, titles, labels, embedded Sports 803 player, and an ImgBB-hosted thumbnail.
 
-Only events with a valid scheduled start time dated **today or later** are eligible. Historical events are ignored, which prevents the first workflow run from flooding Blogger. The default date comparison uses UTC; set the optional repository variable `EVENT_TIMEZONE` (for example, `Africa/Nairobi`) under **Settings → Secrets and variables → Actions → Variables** if “today” should follow your local timezone.
+Only events with a valid scheduled start time dated **today** are eligible, and every event must have at least one stream/player URL. Historical and future events are ignored, which prevents the workflow from flooding Blogger. The default date comparison uses UTC; set the optional repository variable `EVENT_TIMEZONE` (for example, `Africa/Nairobi`) under **Settings → Secrets and variables → Actions → Variables** if “today” should follow your local timezone.
 
 The workflow supports event data for all Dashboard leagues. The racing detection aliases include **MotoGP, NASCAR, WRC, IMSA, and Porsche Carrera Cup**.
 

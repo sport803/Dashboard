@@ -89,13 +89,13 @@ function localDate(value, timeZone) {
   if (!Number.isFinite(date.getTime())) return null;
   return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
 }
-function isTodayOrFuture(event) {
+function isToday(event) {
   const scheduled = startTime(event);
   if (!scheduled) return false;
   const timeZone = process.env.EVENT_TIMEZONE || 'UTC';
   const eventDate = localDate(scheduled, timeZone);
   const today = localDate(Date.now(), timeZone);
-  return Boolean(eventDate && today && eventDate >= today);
+  return Boolean(eventDate && today && eventDate === today);
 }
 function streamLinks(event) {
   const values = [];
@@ -210,7 +210,7 @@ async function main() {
   const eventsUrl = process.env.EVENTS_URL || DEFAULT_EVENTS_URL;
   const raw = await getJson(eventsUrl, { headers: { accept: 'application/json' } });
   const allEvents = normalizeEvents(raw);
-  const events = allEvents.filter(event => !isDead(event) && isTodayOrFuture(event) && matchesConfiguredLeague(event) && streamLinks(event).length);
+  const events = allEvents.filter(event => !isDead(event) && isToday(event) && streamLinks(event).length && matchesConfiguredLeague(event));
   if (process.env.DRY_RUN === '1') {
     console.log(JSON.stringify({ scanned: allEvents.length, eligible: events.length, timezone: process.env.EVENT_TIMEZONE || 'UTC', events: events.map((event, index) => ({ key: eventKey(event, index), title: eventName(event), league: leagueName(event), scheduled: startTime(event), final: isFinal(event), streams: streamLinks(event) })) }));
     return;
