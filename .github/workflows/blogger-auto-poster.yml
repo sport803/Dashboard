@@ -1,0 +1,31 @@
+name: Blogger event auto-poster
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/5 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blogger-event-auto-poster
+  cancel-in-progress: false
+
+jobs:
+  publish-events:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out Dashboard
+        uses: actions/checkout@v4
+
+      - name: Run Blogger event publisher
+        env:
+          BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
+          GOOGLE_CLIENT_ID: ${{ secrets.BLOGGER_GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.BLOGGER_GOOGLE_CLIENT_SECRET }}
+          BLOGGER_REFRESH_TOKEN: ${{ secrets.BLOGGER_REFRESH_TOKEN }}
+          EVENTS_URL: ${{ secrets.BLOGGER_EVENTS_URL }}
+          PLAYER_BASE_URL: https://www.sport803.online/p/player.html
+        run: node scripts/blogger-auto-poster.mjs
