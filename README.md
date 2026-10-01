@@ -11,9 +11,12 @@ Every five minutes, the workflow:
 3. Creates one **LIVE** Blogger post per event.
 4. Uses a stable `s803:event:<hash>` label to prevent duplicate posts.
 5. After the event is final, updates that same post with a highlights/replay article and result.
-6. Uses the Dashboard-style article sections, titles, labels, embedded Sports 803 player, and an ImgBB-hosted thumbnail.
+6. Resolves the matching OneBall live page and August PPV embed feed, then adds them to the Sports 803 player URL using the same `one=` and `embed=` parameters as the Dashboard.
+7. Generates a Dashboard-style logo-based thumbnail and uploads it to ImgBB.
 
 Only events with a valid scheduled start time dated **today** are eligible. Historical and future events are ignored, which prevents the workflow from flooding Blogger. The default date comparison uses `Africa/Nairobi`; set the optional repository variable `EVENT_TIMEZONE` under **Settings → Secrets and variables → Actions → Variables** when another timezone should define “today”.
+
+For a match with a OneBall listing, the generated article contains a player iframe such as `https://www.sport803.online/p/player.html?one=https://oneball.live/live/<match-id>.html`. If August PPV has the same fixture, its `embed=` source is added to that same player URL as a backup/source. The Action uses the stable OneBall match page rather than expiring raw signal URLs.
 
 The workflow supports event data for all Dashboard leagues. The racing detection aliases include **MotoGP, NASCAR, WRC, IMSA, and Porsche Carrera Cup**.
 
