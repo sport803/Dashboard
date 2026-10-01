@@ -115,10 +115,21 @@ async function getJson(url, options = {}) {
   return response.json();
 }
 async function accessToken() {
-  const body = new URLSearchParams({ client_id: required('GOOGLE_CLIENT_ID'), client_secret: required('GOOGLE_CLIENT_SECRET'), refresh_token: required('BLOGGER_REFRESH_TOKEN'), grant_type: 'refresh_token' });
+  const clientId = required('GOOGLE_CLIENT_ID').replace(/^\s+|\s+$/g, '');
+  const clientSecret = required('GOOGLE_CLIENT_SECRET').replace(/^\s+|\s+$/g, '');
+  const refreshToken = required('BLOGGER_REFRESH_TOKEN').replace(/^\s+|\s+$/g, '');
+  const body = new URLSearchParams({ client_id: clientId, client_secret: clientSecret, refresh_token: refreshToken, grant_type: 'refresh_token' });
   const response = await fetch(TOKEN_URL, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body });
   const data = await response.json();
-  if (!response.ok || !data.access_token) throw new Error(`Google token refresh failed: ${data.error_description || data.error || response.status}`);
+  if (!response.ok || !data.access_token) {
+    const detail = data.error_description || data.error || `HTTP ${response.status}`;
+    const hint = data.error === 'invalid_grant'
+      ? 'The refresh token was revoked, expired, or created for a different OAuth client. Generate a new token with the exact client ID and secret stored in GitHub.'
+      : data.error === 'unauthorized_client'
+        ? 'The OAuth client is not allowed to use this grant. Check that the client ID and secret are from the same Web application OAuth client.'
+        : 'Check that the three OAuth GitHub Secrets belong to the same client and contain no quotes or extra whitespace.';
+    throw new Error(`Google token refresh failed: ${detail}. ${hint}`);
+  }
   return data.access_token;
 }
 async function listPosts(token, blogId) {
