@@ -27,8 +27,9 @@ jobs:
           GOOGLE_CLIENT_ID: ${{ secrets.BLOGGER_GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.BLOGGER_GOOGLE_CLIENT_SECRET }}
           BLOGGER_REFRESH_TOKEN: ${{ secrets.BLOGGER_REFRESH_TOKEN }}
+          IMGBB_API_KEY: ${{ secrets.IMGBB_API_KEY }}
         run: |
-          if [ -n "$BLOG_ID" ] && [ -n "$GOOGLE_CLIENT_ID" ] && [ -n "$GOOGLE_CLIENT_SECRET" ] && [ -n "$BLOGGER_REFRESH_TOKEN" ]; then
+          if [ -n "$BLOG_ID" ] && [ -n "$GOOGLE_CLIENT_ID" ] && [ -n "$GOOGLE_CLIENT_SECRET" ] && [ -n "$BLOGGER_REFRESH_TOKEN" ] && [ -n "$IMGBB_API_KEY" ]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
@@ -42,7 +43,9 @@ jobs:
           GOOGLE_CLIENT_ID: ${{ secrets.BLOGGER_GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.BLOGGER_GOOGLE_CLIENT_SECRET }}
           BLOGGER_REFRESH_TOKEN: ${{ secrets.BLOGGER_REFRESH_TOKEN }}
+          IMGBB_API_KEY: ${{ secrets.IMGBB_API_KEY }}
           EVENTS_URL: ${{ secrets.BLOGGER_EVENTS_URL }}
           EVENT_TIMEZONE: ${{ vars.EVENT_TIMEZONE }}
+          AUTO_POST_LEAGUES: ${{ vars.AUTO_POST_LEAGUES }}
           PLAYER_BASE_URL: https://www.sport803.online/p/player.html
         run: node scripts/blogger-auto-poster.mjs

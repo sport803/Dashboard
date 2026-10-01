@@ -18,6 +18,13 @@ const LEAGUE_ALIASES = [
   ['pga', /pga tour/i],
   ['cycling', /cycling|tour de france|giro d.?italia|vuelta/i]
 ];
+const SPORT_LABELS = {
+  soccer: ['Football', 'Football Live Stream'], basketball: ['Basketball', 'Basketball Live Stream'],
+  football: ['American Football', 'Football Live Stream'], hockey: ['Ice Hockey', 'Hockey Live Stream'],
+  tennis: ['Tennis', 'Tennis Live Stream'], baseball: ['Baseball', 'Baseball Live Stream'],
+  racing: ['Motorsport', 'Live Racing'], golf: ['Golf', 'Golf Live Stream'],
+  mma: ['MMA', 'Combat Sports'], cycling: ['Cycling', 'Cycling Live Stream']
+};
 
 const required = (name) => {
   const value = process.env[name];
@@ -57,13 +64,26 @@ function canonicalLeague(event) {
   return LEAGUE_ALIASES.find(([, regex]) => regex.test(haystack))?.[0] || leagueId(event) || 'sports';
 }
 function matchesConfiguredLeague(event) {
-  const configured = text(process.env.LEAGUES).toLowerCase();
+  const configured = text(process.env.AUTO_POST_LEAGUES || process.env.LEAGUES).toLowerCase();
   if (!configured) return true;
   const wanted = new Set(configured.split(',').map(x => x.trim()).filter(Boolean));
   const id = canonicalLeague(event);
   return wanted.has(id) || wanted.has(leagueId(event)) || wanted.has(leagueName(event).toLowerCase());
 }
+function homeName(event) { return text(event.homeName || event.home?.name || event.homeTeam || ''); }
+function awayName(event) { return text(event.awayName || event.away?.name || event.awayTeam || ''); }
+function isRace(event) { return text(event.type).toLowerCase() === 'race' || /racing|motogp|nascar|wrc|imsa|porsche|formula\s*1|\bf1\b/i.test(`${leagueId(event)} ${leagueName(event)} ${eventName(event)}`); }
+function displayEventName(event) { return [homeName(event), awayName(event)].filter(Boolean).join(' vs ') || eventName(event); }
+function eventScore(event) {
+  if (event.score || event.result) return text(event.score || event.result);
+  if (homeName(event) && (event.home?.score !== undefined || event.homeScore !== undefined)) return `${event.home?.score ?? event.homeScore}–${event.away?.score ?? event.awayScore ?? ''}`;
+  return '';
+}
 function startTime(event) { return event.startTime || event.kickoff || event.date || event.start || event.scheduledAt || null; }
+function eventDateText(event) {
+  const value = startTime(event), date = value ? new Date(value) : null;
+  return date && Number.isFinite(date.getTime()) ? date.toLocaleString('en-US', { timeZone: process.env.EVENT_TIMEZONE || 'UTC', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }) : 'the scheduled time';
+}
 function localDate(value, timeZone) {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return null;
@@ -100,10 +120,13 @@ function eventKey(event, index) {
 }
 function markerFor(key) { return `s803:event:${stableHash(key)}`; }
 function labelsFor(event, key, final = false) {
+  const sport = text(event.sport || event.category || '').toLowerCase();
   return [...new Set([
-    'Sports 803', 'Live Sports', leagueName(event), canonicalLeague(event), markerFor(key),
+    leagueName(event), leagueId(event), sport, isRace(event) ? 'Motorsport' : 'Sports', 'Sports 803',
+    ...(SPORT_LABELS[sport] || ['Live Sports']), markerFor(key),
+    ...(homeName(event) ? [homeName(event)] : []), ...(awayName(event) ? [awayName(event)] : []),
     final ? 'Highlights' : 'Event Stream'
-  ])];
+  ].filter(Boolean))];
 }
 function playerUrlFor(event, streams) {
   const existing = streams.find(url => /player|embed/i.test(url));
@@ -111,16 +134,29 @@ function playerUrlFor(event, streams) {
   const first = streams[0];
   return first ? `${PLAYER_BASE}?mora=${encodeURIComponent(first)}` : '';
 }
-function previewHtml(event, streams) {
-  const name = eventName(event), league = leagueName(event), kickoff = startTime(event) ? new Date(startTime(event)).toISOString() : 'TBD';
-  const player = playerUrlFor(event, streams);
-  return `<h2>${htmlEscape(name)} Live Stream</h2><p>Watch ${htmlEscape(name)} live on Sports 803. This ${htmlEscape(league)} event page will be updated with the final result and highlights after the event ends.</p><h2>Event Details</h2><p><strong>Competition:</strong> ${htmlEscape(league)}<br><strong>Scheduled:</strong> ${htmlEscape(kickoff)}</p><h2>How to Watch</h2><p>Use the player below when coverage is available.</p>${player ? `<div id="s803-event-player" style="margin:18px 0;position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:10px"><iframe loading="lazy" src="${htmlEscape(player)}" style="position:absolute;inset:0;width:100%;height:100%;border:0" allowfullscreen allow="autoplay; encrypted-media"></iframe></div>` : ''}`;
+function dashboardSections(event, mode) {
+  const h = htmlEscape(homeName(event) || eventName(event)), a = htmlEscape(awayName(event)), league = htmlEscape(leagueName(event));
+  const fixture = `${h}${a ? ` vs ${a}` : ''}`, kickoff = htmlEscape(eventDateText(event)), score = eventScore(event) ? `<br><strong>Score:</strong> ${htmlEscape(eventScore(event))}` : '';
+  if (isRace(event)) return `<h2>${htmlEscape(leagueName(event))} Race Preview &amp; Live Stream</h2><p>Follow the latest ${league} event on Sports 803 with race context, start-time information, and live viewing details.</p><h2>Race Overview</h2><p>Follow the pace, decisive moves, and turning points from start to finish. The event will bring together the key battles, tactical calls, and late-race pressure that define this competition.</p><h2>Key Moments</h2><p>Review the starts, battles, overtakes, tactical calls, and late-race pressure that shape the replay. Multiple player sources are provided below when available.</p><h2>Championship Impact</h2><p>The result adds important context to the season standings and the next round. Check back on Sports 803 for more ${league} coverage.</p><h2>How To Watch</h2><p>Use the embedded Sports 803 player below to watch the event live and revisit the full replay.</p>`;
+  if (mode === 'highlights') return `<h2>Match Overview</h2><p>${fixture} featured in ${league}. This highlights article brings together the match context, the decisive passages, and the replay so readers can follow the story from the opening phase to the final whistle.</p><h2>Match Details</h2><p><strong>Event:</strong> ${fixture}<br><strong>Competition:</strong> ${league}<br><strong>Scheduled:</strong> ${kickoff}${score}</p><h2>Key Moments</h2><p>The key moments came from changes in tempo, chances created in dangerous areas, defensive recoveries, and the sequences that changed the momentum. Watch the highlights to see each important passage in context.</p><h2>Standout Performers</h2><p>Players who carried the ball forward, created openings, defended dangerous situations, or delivered important set pieces shaped the contest. The replay provides the clearest way to review those contributions.</p><h2>Tactical Review</h2><p>The tactical picture was shaped by pressing intensity, spacing between the lines, transitions, and the way each side responded after losing possession. Reviewing the full sequence helps explain more than the final score alone.</p><h2>What the Result Means</h2><p>This result will influence confidence and preparation for the next round of fixtures. Both sides can use the performance to identify the spells that worked best and the moments that need improvement.</p><h2>How to Watch</h2><p>Use the embedded Sports 803 player and replay link in this article to revisit the main action.</p><h2>Frequently Asked Questions</h2><p><strong>Where can I watch ${fixture}?</strong><br>Return to this Sports 803 article for the latest replay and event information.</p>`;
+  return `<h2>Match Overview</h2><p>${fixture} take on each other in ${league}. This article covers the event context, the main storylines, and the viewing information readers need before the action begins.</p><h2>Match Details</h2><p><strong>Event:</strong> ${fixture}<br><strong>Competition:</strong> ${league}<br><strong>Kickoff:</strong> ${kickoff}</p><h2>Team Form</h2><p>${h} will aim to turn preparation and recent performances into a strong start, while ${a || 'the opposition'} will look for the same. Lineups, availability, confidence, and recent chances will shape the form picture.</p><h2>Head-to-Head</h2><p>The history between these sides adds context to the occasion, but current form and match-day execution remain decisive. Previous meetings can reveal recurring tactical patterns and areas where either side may gain an advantage.</p><h2>Key Players to Watch</h2><p>Watch for the players who can create separation, progress possession, win duels, and make the final pass. Both sides will look for individual moments to change the game.</p><h2>Match Analysis</h2><p>Expect a tactical contest built around possession, pressing, defensive shape, and transitions. The team that manages space between the lines and reacts best after turnovers should create the clearest openings.</p><h2>How to Watch</h2><p>Follow this Sports 803 article for the latest event details and use the embedded player when the stream is available.</p><h2>Frequently Asked Questions</h2><p><strong>When is the event?</strong><br>The latest scheduled time is listed in the Match Details section. <strong>Where can I watch?</strong><br>Use the Sports 803 player and stream information attached to this article.</p>`;
 }
-function highlightsHtml(event, streams) {
-  const name = eventName(event), league = leagueName(event), score = event.score || event.result || [event.homeScore, event.awayScore].filter(x => x !== undefined && x !== '').join(' - ');
-  const links = replayLinks(event);
-  const player = links[0] || playerUrlFor(event, streams);
-  return `<h2>${htmlEscape(name)} Highlights &amp; Replay</h2><p>${htmlEscape(name)} has ended. This ${htmlEscape(league)} recap includes the latest result and replay information for Sports 803 readers.</p><h2>Final Result</h2><p><strong>${htmlEscape(score || 'Final result available from the event feed')}</strong></p><h2>Key Moments</h2><p>The event has concluded. Return to this page for replay coverage and the latest event information.</p>${player ? `<h2>Watch Highlights &amp; Replay</h2><div id="s803-event-player" style="margin:18px 0;position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:10px"><iframe loading="lazy" src="${htmlEscape(player)}" style="position:absolute;inset:0;width:100%;height:100%;border:0" allowfullscreen allow="autoplay; encrypted-media"></iframe></div>` : ''}`;
+function playerIframe(streams) { const player = playerUrlFor(null, streams); return player ? `<div style="margin:18px 0;position:relative;padding-bottom:56.25%;height:0;overflow:hidden"><iframe loading="lazy" allow="encrypted-media" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0" src="${htmlEscape(player)}" frameborder="0" scrolling="no" allowfullscreen></iframe></div>` : ''; }
+function previewHtml(event, streams) { return dashboardSections(event, 'preview') + playerIframe(streams); }
+function highlightsHtml(event, streams) { const links = replayLinks(event); return dashboardSections(event, 'highlights') + playerIframe(links.length ? links : streams); }
+function thumbnailSvg(event, title, final) {
+  const name = htmlEscape(displayEventName(event)), league = htmlEscape(leagueName(event)), date = htmlEscape(eventDateText(event));
+  const bg = final ? '#1a0020' : '#0d1b2a';
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="${bg}"/><stop offset="1" stop-color="#0a0e1a"/></linearGradient></defs><rect width="1920" height="1080" fill="url(#g)"/><rect x="80" y="80" width="1760" height="920" rx="34" fill="none" stroke="#e63946" stroke-width="8"/><text x="140" y="180" fill="#e63946" font-family="Arial,sans-serif" font-size="42" font-weight="700">SPORTS 803</text><text x="140" y="430" fill="white" font-family="Arial,sans-serif" font-size="76" font-weight="700">${name}</text><text x="140" y="535" fill="#4cc9f0" font-family="Arial,sans-serif" font-size="48">${league}</text><text x="140" y="650" fill="#d7dde8" font-family="Arial,sans-serif" font-size="38">${final ? 'HIGHLIGHTS &amp; REPLAY' : 'LIVE STREAM'}</text><text x="140" y="800" fill="#aab4c4" font-family="Arial,sans-serif" font-size="34">${date}</text></svg>`;
+}
+async function uploadImgBb(svg) {
+  const key = text(process.env.IMGBB_API_KEY);
+  if (!key) return '';
+  const fd = new FormData(); fd.append('key', key); fd.append('image', Buffer.from(svg).toString('base64'));
+  const response = await fetch('https://api.imgbb.com/1/upload', { method: 'POST', body: fd });
+  const data = await response.json();
+  if (!response.ok || !data.success) throw new Error(`ImgBB upload failed: ${data.error?.message || response.status}`);
+  return data.data.url;
 }
 async function getJson(url, options = {}) {
   const response = await fetch(url, options);
@@ -179,6 +215,7 @@ async function main() {
     console.log(JSON.stringify({ scanned: allEvents.length, eligible: events.length, timezone: process.env.EVENT_TIMEZONE || 'UTC', events: events.map((event, index) => ({ key: eventKey(event, index), title: eventName(event), league: leagueName(event), scheduled: startTime(event), final: isFinal(event), streams: streamLinks(event) })) }));
     return;
   }
+  required('IMGBB_API_KEY');
   const token = await accessToken();
   const posts = await listPosts(token, blogId);
   const byMarker = new Map();
@@ -189,22 +226,30 @@ async function main() {
     const event = events[index];
     const key = eventKey(event, index), marker = markerFor(key), streams = streamLinks(event), final = isFinal(event);
     const existing = byMarker.get(marker);
-    const title = final ? `${eventName(event)} – Highlights & Replay | Sports 803` : `${eventName(event)} – Live Stream | Sports 803`;
-    const content = final ? highlightsHtml(event, streams) : previewHtml(event, streams);
+    const label = isRace(event) ? eventName(event) : displayEventName(event);
+    const title = isRace(event) ? (final ? `${label} – Full Race Replay | Sports 803` : `${label} – Race Preview & Live Stream | Sports 803`) : (final ? `${label} – Highlights & Replay | Sports 803` : `${label} – ${leagueName(event)} Live Stream | Sports 803`);
+    const shouldUpdate = Boolean(existing && final && !(existing.labels || []).includes('Highlights'));
+    if (existing && !shouldUpdate) {
+      skipped++;
+      console.log(`skipped ${existing.id}: ${title}`);
+      continue;
+    }
+    const article = final ? highlightsHtml(event, streams) : previewHtml(event, streams);
+    let thumbUrl = '';
+    try { thumbUrl = await uploadImgBb(thumbnailSvg(event, title, final)); } catch (error) { throw new Error(`[ImgBB] ${title}: ${error.message}`); }
+    const thumbHtml = thumbUrl ? `<div><img src="${htmlEscape(thumbUrl)}" style="max-width:100%;height:auto;border-radius:10px;margin-bottom:18px" alt="${htmlEscape(title)}"></div>\n` : '';
+    const content = thumbHtml + article;
     const payload = { kind: 'blogger#post', blog: { id: blogId }, title, content, labels: labelsFor(event, key, final), searchDescription: `${eventName(event)} ${final ? 'highlights and replay' : 'live stream'} on Sports 803`.slice(0, 150) };
     if (!existing) {
       const post = await bloggerWrite(token, blogId, null, payload);
       byMarker.set(marker, post); created++;
       console.log(`created ${post.id}: ${title}`);
-    } else if (final && !(existing.labels || []).includes('Highlights')) {
+    } else if (shouldUpdate) {
       payload.id = existing.id;
       if (existing.published) payload.published = existing.published;
       const post = await bloggerWrite(token, blogId, existing.id, payload);
       byMarker.set(marker, post); updated++;
       console.log(`updated ${post.id}: ${title}`);
-    } else {
-      skipped++;
-      console.log(`skipped ${existing.id}: ${title}`);
     }
     await sleep(500);
   }
