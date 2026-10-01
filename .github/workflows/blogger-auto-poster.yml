@@ -43,5 +43,6 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.BLOGGER_GOOGLE_CLIENT_SECRET }}
           BLOGGER_REFRESH_TOKEN: ${{ secrets.BLOGGER_REFRESH_TOKEN }}
           EVENTS_URL: ${{ secrets.BLOGGER_EVENTS_URL }}
+          EVENT_TIMEZONE: ${{ vars.EVENT_TIMEZONE }}
           PLAYER_BASE_URL: https://www.sport803.online/p/player.html
         run: node scripts/blogger-auto-poster.mjs

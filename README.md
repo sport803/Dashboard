@@ -12,6 +12,8 @@ Every five minutes, the workflow:
 4. Uses a stable `s803:event:<hash>` label to prevent duplicate posts.
 5. After the event is final, updates that same post with a highlights/replay article and result.
 
+Only events with a valid scheduled start time dated **today or later** are eligible. Historical events are ignored, which prevents the first workflow run from flooding Blogger. The default date comparison uses UTC; set the optional repository variable `EVENT_TIMEZONE` (for example, `Africa/Nairobi`) under **Settings → Secrets and variables → Actions → Variables** if “today” should follow your local timezone.
+
 The workflow supports event data for all Dashboard leagues. The racing detection aliases include **MotoGP, NASCAR, WRC, IMSA, and Porsche Carrera Cup**.
 
 ### Required GitHub repository secrets
@@ -30,6 +32,12 @@ Optional:
 | Secret | Purpose |
 |---|---|
 | `BLOGGER_EVENTS_URL` | Override the default Firebase `todaysMatches` JSON endpoint |
+
+Optional Actions variable:
+
+| Variable | Purpose |
+|---|---|
+| `EVENT_TIMEZONE` | IANA timezone used for the today/future filter; defaults to `UTC` |
 
 The refresh token is required because GitHub Actions does not have a browser session. Do not commit it to the repository or place it in `index.html`.
 

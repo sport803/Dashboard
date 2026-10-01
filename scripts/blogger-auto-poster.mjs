@@ -64,6 +64,19 @@ function matchesConfiguredLeague(event) {
   return wanted.has(id) || wanted.has(leagueId(event)) || wanted.has(leagueName(event).toLowerCase());
 }
 function startTime(event) { return event.startTime || event.kickoff || event.date || event.start || event.scheduledAt || null; }
+function localDate(value, timeZone) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return null;
+  return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
+}
+function isTodayOrFuture(event) {
+  const scheduled = startTime(event);
+  if (!scheduled) return false;
+  const timeZone = process.env.EVENT_TIMEZONE || 'UTC';
+  const eventDate = localDate(scheduled, timeZone);
+  const today = localDate(Date.now(), timeZone);
+  return Boolean(eventDate && today && eventDate >= today);
+}
 function streamLinks(event) {
   const values = [];
   const add = (value) => { if (typeof value === 'string' && /^https?:\/\//i.test(value)) values.push(value); };
@@ -160,9 +173,10 @@ async function main() {
   const blogId = required('BLOG_ID');
   const eventsUrl = process.env.EVENTS_URL || DEFAULT_EVENTS_URL;
   const raw = await getJson(eventsUrl, { headers: { accept: 'application/json' } });
-  const events = normalizeEvents(raw).filter(event => !isDead(event) && matchesConfiguredLeague(event) && streamLinks(event).length);
+  const allEvents = normalizeEvents(raw);
+  const events = allEvents.filter(event => !isDead(event) && isTodayOrFuture(event) && matchesConfiguredLeague(event) && streamLinks(event).length);
   if (process.env.DRY_RUN === '1') {
-    console.log(JSON.stringify(events.map((event, index) => ({ key: eventKey(event, index), title: eventName(event), league: leagueName(event), final: isFinal(event), streams: streamLinks(event) }))));
+    console.log(JSON.stringify({ scanned: allEvents.length, eligible: events.length, timezone: process.env.EVENT_TIMEZONE || 'UTC', events: events.map((event, index) => ({ key: eventKey(event, index), title: eventName(event), league: leagueName(event), scheduled: startTime(event), final: isFinal(event), streams: streamLinks(event) })) }));
     return;
   }
   const token = await accessToken();
