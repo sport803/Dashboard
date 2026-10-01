@@ -29,12 +29,6 @@ Add these under **Settings → Secrets and variables → Actions → New reposit
 | `BLOGGER_REFRESH_TOKEN` | OAuth refresh token with Blogger scope |
 | `IMGBB_API_KEY` | ImgBB API key used to upload each generated event thumbnail |
 
-Optional:
-
-| Secret | Purpose |
-|---|---|
-| `BLOGGER_EVENTS_URL` | Optional explicit override for testing or another event feed; when empty, the Action uses the Dashboard’s ESPN feeds |
-
 Optional Actions variable:
 
 | Variable | Purpose |

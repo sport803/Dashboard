@@ -44,7 +44,6 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.BLOGGER_GOOGLE_CLIENT_SECRET }}
           BLOGGER_REFRESH_TOKEN: ${{ secrets.BLOGGER_REFRESH_TOKEN }}
           IMGBB_API_KEY: ${{ secrets.IMGBB_API_KEY }}
-          EVENTS_URL: ${{ secrets.BLOGGER_EVENTS_URL }}
           EVENT_TIMEZONE: ${{ vars.EVENT_TIMEZONE }}
           AUTO_POST_LEAGUES: ${{ vars.AUTO_POST_LEAGUES }}
           PLAYER_BASE_URL: https://www.sport803.online/p/player.html

@@ -252,12 +252,11 @@ async function fetchDashboardEvents() {
 }
 async function main() {
   const blogId = required('BLOG_ID');
-  // EVENTS_URL is an explicit escape hatch; the normal path must match the UI.
-  const allEvents = process.env.EVENTS_URL ? normalizeEvents(await getJson(process.env.EVENTS_URL, { headers: { accept: 'application/json' } })) : await fetchDashboardEvents();
+  const allEvents = await fetchDashboardEvents();
   // Dashboard cards are valid events before an external stream is resolved.
   const events = allEvents.filter(event => !isDead(event) && isToday(event) && matchesConfiguredLeague(event));
   if (process.env.DRY_RUN === '1') {
-    console.log(JSON.stringify({ source: process.env.EVENTS_URL || 'dashboard-espn', scanned: allEvents.length, eligible: events.length, timezone: process.env.EVENT_TIMEZONE || 'Africa/Nairobi', events: events.map((event, index) => ({ key: eventKey(event, index), title: eventName(event), league: leagueName(event), scheduled: startTime(event), final: isFinal(event), streams: streamLinks(event) })) }));
+    console.log(JSON.stringify({ source: 'dashboard-espn', scanned: allEvents.length, eligible: events.length, timezone: process.env.EVENT_TIMEZONE || 'Africa/Nairobi', events: events.map((event, index) => ({ key: eventKey(event, index), title: eventName(event), league: leagueName(event), scheduled: startTime(event), final: isFinal(event), streams: streamLinks(event) })) }));
     return;
   }
   required('IMGBB_API_KEY');
