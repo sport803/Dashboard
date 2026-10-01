@@ -2,8 +2,19 @@
 
 const BLOGGER_API = 'https://www.googleapis.com/blogger/v3';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
-const DEFAULT_EVENTS_URL = 'https://sports-803-1b806-default-rtdb.firebaseio.com/s803config/todaysMatches.json';
+const ESPN_API = 'https://site.api.espn.com/apis/site/v2/sports';
 const PLAYER_BASE = process.env.PLAYER_BASE_URL || 'https://www.sport803.online/p/player.html';
+// Keep this catalog in sync with the Dashboard's LEAGUES list. The browser
+// dashboard fetches these ESPN scoreboard feeds directly; Firebase is only
+// used by the dashboard for post-log/cloud data, not for event discovery.
+const DASHBOARD_LEAGUES = [
+  ['ucl', 'soccer', 'uefa.champions', 'Champions League', 'match'], ['uwcl', 'soccer', 'uefa.wchampions', "UEFA Women's Champions League", 'match'], ['uel', 'soccer', 'uefa.europa', 'Europa League', 'match'],
+  ['epl', 'soccer', 'eng.1', 'Premier League', 'match'], ['laliga', 'soccer', 'esp.1', 'La Liga', 'match'], ['seriea', 'soccer', 'ita.1', 'Serie A', 'match'], ['bundesliga', 'soccer', 'ger.1', 'Bundesliga', 'match'], ['ligue1', 'soccer', 'fra.1', 'Ligue 1', 'match'], ['mls', 'soccer', 'usa.1', 'MLS', 'match'],
+  ['worldcup', 'soccer', 'fifa.world', 'FIFA World Cup', 'match'], ['euro', 'soccer', 'uefa.euro', 'UEFA Euro', 'match'], ['afconqual', 'soccer', 'caf.nations_qual', 'Africa Cup of Nations Qualifiers', 'match'], ['euroqual', 'soccer', 'uefa.euroq', 'UEFA Euro Qualifiers', 'match'], ['concacafnl', 'soccer', 'concacaf.nations.league', 'Concacaf Nations League', 'match'], ['nations', 'soccer', 'uefa.nations', 'UEFA Nations League', 'match'], ['intlfriendly', 'soccer', 'fifa.friendly', 'Intl Friendlies', 'match'],
+  ['nba', 'basketball', 'nba', 'NBA', 'match'], ['wnba', 'basketball', 'wnba', "Women's National Basketball Association", 'match'], ['nfl', 'football', 'nfl', 'NFL', 'match'], ['nhl', 'hockey', 'nhl', 'NHL', 'match'],
+  ['f1', 'racing', 'f1', 'Formula 1', 'race'], ['nascar', 'racing', 'nascar-cup-series', 'NASCAR', 'race'], ['wrc', 'racing', 'wrc', 'WRC', 'race'], ['imsa', 'racing', 'imsa', 'IMSA', 'race'], ['porsche-carrera-cup', 'racing', 'porsche-carrera-cup', 'Porsche Carrera Cup', 'race'], ['pga', 'golf', 'pga', 'PGA Tour', 'race'], ['ufc', 'mma', 'ufc', 'UFC / MMA', 'match'], ['atp', 'tennis', 'atp', 'ATP Tennis', 'match'], ['wta', 'tennis', 'wta', 'WTA Tennis', 'match'],
+  ['efl', 'soccer', 'eng.2', 'Championship', 'match'], ['efltrophy', 'soccer', 'eng.trophy', 'English Football League Trophy', 'match'], ['spl', 'soccer', 'ksa.1', 'Saudi Pro League', 'match'], ['eredivisie', 'soccer', 'ned.1', 'Eredivisie', 'match'], ['primeira', 'soccer', 'por.1', 'Primeira Liga', 'match'], ['facup', 'soccer', 'eng.fa', 'FA Cup', 'match'], ['motogp', 'racing', 'motogp', 'MotoGP', 'race'], ['cycling', 'cycling', 'world', 'Cycling', 'race'], ['mlb', 'baseball', 'mlb', 'MLB', 'match']
+].map(([id, sport, slug, name, type]) => ({ id, sport, slug, name, type }));
 const ALLOWED_LEAGUE_IDS = new Set([
   'motogp', 'nascar', 'wrc', 'imsa', 'porsche-carrera-cup', 'porsche',
   'f1', 'pga', 'cycling'
@@ -57,7 +68,10 @@ function eventName(event) {
   const away = event.awayName || event.away?.name || event.awayTeam || '';
   return [home, away].filter(Boolean).join(' vs ') || 'Sports event';
 }
-function leagueName(event) { return text(event.leagueName || event.league || event.category || event.series || event.competition || 'Live Sports'); }
+function leagueName(event) {
+  const league = typeof event.league === 'object' ? event.league?.name : event.league;
+  return text(event.leagueName || league || event.category || event.series || event.competition || 'Live Sports');
+}
 function leagueId(event) { return text(event.leagueId || event.league?.id || event.sportId || '').toLowerCase(); }
 function canonicalLeague(event) {
   const haystack = `${leagueId(event)} ${leagueName(event)} ${eventName(event)}`;
@@ -92,7 +106,7 @@ function localDate(value, timeZone) {
 function isToday(event) {
   const scheduled = startTime(event);
   if (!scheduled) return false;
-  const timeZone = process.env.EVENT_TIMEZONE || 'UTC';
+  const timeZone = process.env.EVENT_TIMEZONE || 'Africa/Nairobi';
   const eventDate = localDate(scheduled, timeZone);
   const today = localDate(Date.now(), timeZone);
   return Boolean(eventDate && today && eventDate === today);
@@ -205,14 +219,45 @@ function normalizeEvents(raw) {
   if (raw && typeof raw === 'object') return Object.entries(raw).map(([key, value]) => ({ ...(value || {}), id: value?.id || key }));
   return [];
 }
+function dashboardDate(timeZone) {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.filter(part => part.type !== 'literal').map(part => [part.type, part.value]));
+  return `${values.year}${values.month}${values.day}`;
+}
+function parseDashboardEvent(event, league) {
+  const competition = event.competitions?.[0] || {}, competitors = competition.competitors || [];
+  const home = competitors.find(item => item.homeAway === 'home') || competitors[0] || {};
+  const away = competitors.find(item => item.homeAway === 'away') || competitors[1] || {};
+  const teamName = item => item.team?.displayName || item.team?.shortDisplayName || 'TBD';
+  const logo = item => String(item.team?.logo || item.team?.logos?.[0]?.href || '').replace(/^http:\/\//i, 'https://');
+  const status = event.status?.type?.description || 'Scheduled';
+  if (league.type === 'race') return { id: event.id, league, type: 'race', name: event.name || event.shortName || `${league.name} event`, status, startTime: event.date };
+  return { id: event.id, league, type: 'match', home: { name: teamName(home), logo: logo(home), score: home.score ?? '' }, away: { name: teamName(away), logo: logo(away), score: away.score ?? '' }, status, startTime: event.date };
+}
+async function fetchDashboardEvents() {
+  const timeZone = process.env.EVENT_TIMEZONE || 'Africa/Nairobi';
+  const date = process.env.EVENT_DATE || dashboardDate(timeZone);
+  const results = await Promise.allSettled(DASHBOARD_LEAGUES.map(async league => {
+    const slugs = [league.slug];
+    if (league.id === 'nations') slugs.push('uefa.nations_league');
+    for (const slug of slugs) {
+      try {
+        const data = await getJson(`${ESPN_API}/${league.sport}/${slug}/scoreboard?dates=${encodeURIComponent(date)}`, { headers: { accept: 'application/json' } });
+        if (Array.isArray(data.events) && data.events.length) return data.events.map(event => parseDashboardEvent(event, league));
+      } catch (error) { console.warn(`[ESPN] ${league.name} (${slug}): ${error.message}`); }
+    }
+    return [];
+  }));
+  return results.flatMap(result => result.status === 'fulfilled' ? result.value : []);
+}
 async function main() {
   const blogId = required('BLOG_ID');
-  const eventsUrl = process.env.EVENTS_URL || DEFAULT_EVENTS_URL;
-  const raw = await getJson(eventsUrl, { headers: { accept: 'application/json' } });
-  const allEvents = normalizeEvents(raw);
-  const events = allEvents.filter(event => !isDead(event) && isToday(event) && streamLinks(event).length && matchesConfiguredLeague(event));
+  // EVENTS_URL is an explicit escape hatch; the normal path must match the UI.
+  const allEvents = process.env.EVENTS_URL ? normalizeEvents(await getJson(process.env.EVENTS_URL, { headers: { accept: 'application/json' } })) : await fetchDashboardEvents();
+  // Dashboard cards are valid events before an external stream is resolved.
+  const events = allEvents.filter(event => !isDead(event) && isToday(event) && matchesConfiguredLeague(event));
   if (process.env.DRY_RUN === '1') {
-    console.log(JSON.stringify({ scanned: allEvents.length, eligible: events.length, timezone: process.env.EVENT_TIMEZONE || 'UTC', events: events.map((event, index) => ({ key: eventKey(event, index), title: eventName(event), league: leagueName(event), scheduled: startTime(event), final: isFinal(event), streams: streamLinks(event) })) }));
+    console.log(JSON.stringify({ source: process.env.EVENTS_URL || 'dashboard-espn', scanned: allEvents.length, eligible: events.length, timezone: process.env.EVENT_TIMEZONE || 'Africa/Nairobi', events: events.map((event, index) => ({ key: eventKey(event, index), title: eventName(event), league: leagueName(event), scheduled: startTime(event), final: isFinal(event), streams: streamLinks(event) })) }));
     return;
   }
   required('IMGBB_API_KEY');

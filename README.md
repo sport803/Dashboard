@@ -6,14 +6,14 @@ The repository includes an unattended worker at `scripts/blogger-auto-poster.mjs
 
 Every five minutes, the workflow:
 
-1. Reads the Dashboard event feed from Firebase (or `BLOGGER_EVENTS_URL` when provided).
-2. Keeps only events that have a stream/player URL.
+1. Queries the same ESPN scoreboard endpoints and league catalog used by the Dashboard UI (not Firebase).
+2. Keeps all non-cancelled events scheduled today; an external stream/player URL is optional because Dashboard event cards are valid before stream enrichment.
 3. Creates one **LIVE** Blogger post per event.
 4. Uses a stable `s803:event:<hash>` label to prevent duplicate posts.
 5. After the event is final, updates that same post with a highlights/replay article and result.
 6. Uses the Dashboard-style article sections, titles, labels, embedded Sports 803 player, and an ImgBB-hosted thumbnail.
 
-Only events with a valid scheduled start time dated **today** are eligible, and every event must have at least one stream/player URL. Historical and future events are ignored, which prevents the workflow from flooding Blogger. The default date comparison uses UTC; set the optional repository variable `EVENT_TIMEZONE` (for example, `Africa/Nairobi`) under **Settings → Secrets and variables → Actions → Variables** if “today” should follow your local timezone.
+Only events with a valid scheduled start time dated **today** are eligible. Historical and future events are ignored, which prevents the workflow from flooding Blogger. The default date comparison uses `Africa/Nairobi`; set the optional repository variable `EVENT_TIMEZONE` under **Settings → Secrets and variables → Actions → Variables** when another timezone should define “today”.
 
 The workflow supports event data for all Dashboard leagues. The racing detection aliases include **MotoGP, NASCAR, WRC, IMSA, and Porsche Carrera Cup**.
 
@@ -33,13 +33,13 @@ Optional:
 
 | Secret | Purpose |
 |---|---|
-| `BLOGGER_EVENTS_URL` | Override the default Firebase `todaysMatches` JSON endpoint |
+| `BLOGGER_EVENTS_URL` | Optional explicit override for testing or another event feed; when empty, the Action uses the Dashboard’s ESPN feeds |
 
 Optional Actions variable:
 
 | Variable | Purpose |
 |---|---|
-| `EVENT_TIMEZONE` | IANA timezone used for the today/future filter; defaults to `UTC` |
+| `EVENT_TIMEZONE` | IANA timezone used for the ESPN date query and today filter; defaults to `Africa/Nairobi` |
 | `AUTO_POST_LEAGUES` | Comma-separated league IDs/names to publish; blank means all eligible leagues |
 
 ### Choosing leagues
