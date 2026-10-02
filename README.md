@@ -14,11 +14,15 @@ Every five minutes, the workflow:
 6. Resolves the matching OneBall live page and August PPV embed feed, then adds them to the Sports 803 player URL using the same `one=` and `embed=` parameters as the Dashboard.
 7. Generates a Dashboard-style logo-based thumbnail and uploads it to ImgBB.
 
-Only events with a valid scheduled start time dated **today** are eligible. Historical and future events are ignored, which prevents the workflow from flooding Blogger. The default date comparison uses `Africa/Nairobi`; set the optional repository variable `EVENT_TIMEZONE` under **Settings → Secrets and variables → Actions → Variables** when another timezone should define “today”.
+Normal events with a valid scheduled start time dated **today** are eligible. Racing events use the selected date plus or minus one day so multi-day weekends are not missed. Older unrelated events are still ignored. The default date comparison uses `Africa/Nairobi`; set the optional repository variable `EVENT_TIMEZONE` under **Settings → Secrets and variables → Actions → Variables** when another timezone should define “today”.
 
 For a match with a OneBall listing, the generated article contains a player iframe such as `https://www.sport803.online/p/player.html?one=https://oneball.live/live/<match-id>.html`. If August PPV has the same fixture, its `embed=` source is added to that same player URL as a backup/source. The Action uses the stable OneBall match page rather than expiring raw signal URLs.
 
 The publisher uses bounded HTTP timeouts and retries for transient feed, logo, ImgBB, OAuth, and Blogger failures. It caches successful team-logo lookups between runs, validates its environment before making network calls, limits Blogger labels to 20, fetches existing post bodies only when a player-link comparison is needed, and reports per-event failures without preventing other events from being processed.
+
+### Racing event discovery
+
+The dashboard and Action now use a three-day window (target date ±1 day) and deduplicate events by ID. ESPN remains the primary source for normal leagues and supported Formula 1/IndyCar feeds. MotoGP, WRC, IMSA, NASCAR, and other unsupported racing slugs use TheSportsDB's Motorsport day feed, cached once per date per run. Race events from adjacent days are retained so multi-day weekends are visible on the selected date. Broken sources are reported in the dashboard source legend and in the Action log instead of silently becoming zero events.
 
 The workflow supports event data for all Dashboard leagues. The racing detection aliases include **MotoGP, NASCAR, WRC, IMSA, and Porsche Carrera Cup**.
 

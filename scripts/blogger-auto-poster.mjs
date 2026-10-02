@@ -57,6 +57,13 @@ const SPORT_LABELS = {
   mma: ['MMA', 'Combat Sports'], cycling: ['Cycling', 'Cycling Live Stream']
 };
 
+// v11: racing leagues now use TheSportsDB; ESPN is used only for f1/indycar and non-racing sports.
+// Multi-day events use a ±1 day window and dedupe by event id.
+const ESPN_RACING_SUPPORTED = new Set(['f1', 'indycar']);
+const TSDB_RACING_LEAGUE = { motogp: [4407], wrc: [4445, 4409], imsa: [4455], nascar: [4393, 4573], indycar: [4471], formulae: [4480], wsbk: [4484] };
+const tsdbRacingDayCache = new Map();
+const leagueFetchStatus = {}, leagueFetchSource = {};
+
 function eventTimeZone() { return process.env.EVENT_TIMEZONE || 'Africa/Nairobi'; }
 
 /**
@@ -550,6 +557,34 @@ function dashboardDate(timeZone) {
   const values = Object.fromEntries(parts.filter(part => part.type !== 'literal').map(part => [part.type, part.value]));
   return `${values.year}${values.month}${values.day}`;
 }
+function eventDateWindow() {
+  const raw = process.env.EVENT_DATE;
+  const normalized = raw && /^\d{8}$/.test(raw) ? `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}` : raw;
+  const anchor = normalized ? new Date(`${normalized}T12:00:00`) : new Date(`${dashboardDate(eventTimeZone()).slice(0, 4)}-${dashboardDate(eventTimeZone()).slice(4, 6)}-${dashboardDate(eventTimeZone()).slice(6, 8)}T12:00:00`);
+  return [-1, 0, 1].map(offset => { const date = new Date(anchor); date.setDate(date.getDate() + offset); return date.toISOString().slice(0, 10); });
+}
+function dedupeEvents(events) {
+  const seen = new Set();
+  return events.filter(event => { const key = text(event.id || event.name); if (!key || seen.has(key)) return false; seen.add(key); return true; });
+}
+function setLeagueFetchResult(league, status, source) { leagueFetchStatus[league.id] = status; leagueFetchSource[league.id] = source || ''; }
+async function fetchTSDBRacingDay(date) {
+  if (tsdbRacingDayCache.has(date)) return tsdbRacingDayCache.get(date);
+  const promise = getJson(`${TSDB_API}/eventsday.php?d=${encodeURIComponent(date)}&s=Motorsport`, { headers: { accept: 'application/json', 'user-agent': USER_AGENT } }).then(data => Array.isArray(data.events) ? data.events : []);
+  tsdbRacingDayCache.set(date, promise);
+  try { return await promise; } catch (error) { tsdbRacingDayCache.delete(date); throw error; }
+}
+// v11: normalize TheSportsDB motorsport events to the dashboard race model.
+async function fetchRacingFromTSDB(league, dates = eventDateWindow()) {
+  const allowedIds = new Set(TSDB_RACING_LEAGUE[league.id] || []);
+  if (!allowedIds.size) return [];
+  const dayResults = await Promise.all(dates.map(fetchTSDBRacingDay));
+  const events = dayResults.flat().filter(event => {
+    const name = text(event.strLeague).toLowerCase();
+    return allowedIds.has(Number(event.idLeague)) || (league.id === 'wrc' && /wrc|world rally/.test(name)) || (league.id === 'imsa' && /imsa|weathertech|sportscar/.test(name)) || (league.id === 'nascar' && /nascar/.test(name));
+  }).map(event => ({ id: event.idEvent, league, type: 'race', name: event.strEvent || `${league.name} race`, venue: event.strVenue || '', location: event.strCity || event.strCountry || '', entries: [], status: event.strStatus || 'Scheduled', startTime: event.strTimestamp ? new Date(event.strTimestamp) : (event.dateEvent ? new Date(`${event.dateEvent}T${event.strTime || '12:00:00'}`) : null), source: 'TheSportsDB' }));
+  return dedupeEvents(events);
+}
 function parseDashboardEvent(event, league) {
   const competition = event.competitions?.[0] || {}, competitors = competition.competitors || [];
   const home = competitors.find(item => item.homeAway === 'home') || competitors[0] || {};
@@ -557,23 +592,44 @@ function parseDashboardEvent(event, league) {
   const teamName = item => item.team?.displayName || item.team?.shortDisplayName || 'TBD';
   const logo = item => String(item.team?.logo || item.team?.logos?.[0]?.href || '').replace(/^http:\/\//i, 'https://');
   const status = event.status?.type?.description || 'Scheduled';
-  if (league.type === 'race') return { id: event.id, league, type: 'race', name: event.name || event.shortName || `${league.name} event`, status, startTime: event.date };
+  if (league.type === 'race') return { id: event.id, league, type: 'race', name: event.name || event.shortName || `${league.name} event`, status, startTime: event.date, endTime: event.endDate || competition.endDate || null, source: 'ESPN' };
   return { id: event.id, league, type: 'match', home: { name: teamName(home), logo: logo(home), score: home.score ?? '' }, away: { name: teamName(away), logo: logo(away), score: away.score ?? '' }, status, startTime: event.date };
 }
-async function fetchDashboardEvents() {
-  const date = process.env.EVENT_DATE || dashboardDate(eventTimeZone());
-  const results = await Promise.allSettled(DASHBOARD_LEAGUES.map(async league => {
-    const slugs = [league.slug];
-    if (league.id === 'nations') slugs.push('uefa.nations_league');
-    for (const slug of slugs) {
+// v11: every broken source is logged; empty 200 responses remain valid empty leagues.
+async function fetchLeague(league, dates = eventDateWindow()) {
+  const anchorDate = dates[1];
+  if (league.type === 'race' && !ESPN_RACING_SUPPORTED.has(league.id)) {
+    try { const events = await fetchRacingFromTSDB(league, dates); setLeagueFetchResult(league, events.length ? 'ok' : 'empty', 'TheSportsDB'); return events; }
+    catch (error) { setLeagueFetchResult(league, 'error', 'TheSportsDB'); throw new Error(`${league.name} TheSportsDB failed: ${error.message}`); }
+  }
+  const slugs = [league.slug];
+  if (league.id === 'nations') slugs.push('uefa.nations_league');
+  let hadEmpty = false, lastError = null;
+  for (const slug of slugs) {
+    const collected = [];
+    for (const date of dates) {
       try {
-        const data = await getJson(`${ESPN_API}/${league.sport}/${slug}/scoreboard?dates=${encodeURIComponent(date)}`, { headers: { accept: 'application/json' } });
-        if (Array.isArray(data.events) && data.events.length) return data.events.map(event => parseDashboardEvent(event, league));
-      } catch (error) { console.warn(`[ESPN] ${league.name} (${slug}): ${error.message}`); }
+        const data = await getJson(`${ESPN_API}/${league.sport}/${slug}/scoreboard?dates=${encodeURIComponent(date.replace(/-/g, ''))}`, { headers: { accept: 'application/json' } });
+        if (Array.isArray(data.events) && data.events.length) collected.push(...data.events.map(event => ({ event, date })));
+        else hadEmpty = true;
+      } catch (error) { lastError = error; console.warn(`[ESPN] ${league.name} (${slug}, ${date}): ${error.message}`); }
     }
-    return [];
-  }));
-  return results.flatMap(result => result.status === 'fulfilled' ? result.value : []);
+    const parsed = dedupeEvents(collected.filter(item => league.type === 'race' || item.date === anchorDate).map(item => parseDashboardEvent(item.event, league)));
+    if (parsed.length) { setLeagueFetchResult(league, 'ok', 'ESPN'); return parsed; }
+  }
+  if (league.type === 'race') {
+    try { const events = await fetchRacingFromTSDB(league, dates); setLeagueFetchResult(league, events.length ? 'ok' : 'empty', 'TheSportsDB'); return events; }
+    catch (error) { lastError = error; console.warn(`[TSDB] ${league.name}: ${error.message}`); }
+  }
+  if (lastError && !hadEmpty) { setLeagueFetchResult(league, 'error', 'ESPN'); throw new Error(`${league.name} ESPN failed: ${lastError.message}`); }
+  setLeagueFetchResult(league, 'empty', 'ESPN');
+  return [];
+}
+async function fetchDashboardEvents() {
+  const dates = eventDateWindow();
+  const results = await Promise.allSettled(DASHBOARD_LEAGUES.map(league => fetchLeague(league, dates)));
+  results.forEach((result, index) => { if (result.status === 'rejected') console.warn(`[Fetch] ${DASHBOARD_LEAGUES[index].name} failed: ${result.reason?.message || result.reason}`); });
+  return dedupeEvents(results.flatMap(result => result.status === 'fulfilled' ? result.value : []));
 }
 
 // ============================================================================
@@ -652,7 +708,7 @@ async function main() {
   const config = loadConfig(); // validates env + timezone before any network call
   const allEvents = await attachExternalSources(await fetchDashboardEvents());
   // Dashboard cards are valid events before an external stream is resolved.
-  const events = allEvents.filter(event => !isDead(event) && isToday(event) && matchesConfiguredLeague(event));
+  const events = allEvents.filter(event => !isDead(event) && (isToday(event) || (event.type === 'race' && (event.source === 'ESPN' || event.source === 'TheSportsDB'))) && matchesConfiguredLeague(event));
 
   if (config.dryRun) {
     let sampleThumbnail = '', failed = 0;
@@ -684,7 +740,7 @@ export {
   attachExternalSources, buildFeedIndex, replayLinks, eventKey, markerFor, labelsFor, playerUrlFor,
   dashboardSections, raceSections, previewSections, highlightsSections, contentHasPlayer,
   teamLogoUrl, saveLogoCache, resetLogoCache, logoMarkup, thumbnailSvg, uploadImgBb,
-  accessToken, listPosts, getPostBody, bloggerWrite, processEvents, parseDashboardEvent
+  accessToken, listPosts, getPostBody, bloggerWrite, processEvents, parseDashboardEvent, fetchLeague, fetchDashboardEvents, fetchRacingFromTSDB, leagueFetchStatus, leagueFetchSource
 };
 
 const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
