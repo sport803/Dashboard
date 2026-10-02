@@ -18,6 +18,8 @@ Only events with a valid scheduled start time dated **today** are eligible. Hist
 
 For a match with a OneBall listing, the generated article contains a player iframe such as `https://www.sport803.online/p/player.html?one=https://oneball.live/live/<match-id>.html`. If August PPV has the same fixture, its `embed=` source is added to that same player URL as a backup/source. The Action uses the stable OneBall match page rather than expiring raw signal URLs.
 
+The publisher uses bounded HTTP timeouts and retries for transient feed, logo, ImgBB, OAuth, and Blogger failures. It caches successful team-logo lookups between runs, validates its environment before making network calls, limits Blogger labels to 20, fetches existing post bodies only when a player-link comparison is needed, and reports per-event failures without preventing other events from being processed.
+
 The workflow supports event data for all Dashboard leagues. The racing detection aliases include **MotoGP, NASCAR, WRC, IMSA, and Porsche Carrera Cup**.
 
 ### Required GitHub repository secrets
