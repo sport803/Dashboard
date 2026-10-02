@@ -536,7 +536,7 @@ async function getPostBody(token, blogId, postId) {
   return typeof data.content === 'string' ? data.content : '';
 }
 async function getPostForRepair(token, blogId, postId) {
-  const query = new URLSearchParams({ fetchBodies: 'true', fields: 'id,title,content,labels,published,searchDescription' });
+  const query = new URLSearchParams({ fetchBodies: 'true', fields: 'id,title,content,labels,published' });
   return getJson(`${BLOGGER_API}/blogs/${encodeURIComponent(blogId)}/posts/${encodeURIComponent(postId)}?${query}`, { headers: { authorization: `Bearer ${token}` } });
 }
 async function repairMalformedPlayerUrls(token, blogId, posts, sleepFn = sleep) {
@@ -549,7 +549,6 @@ async function repairMalformedPlayerUrls(token, blogId, posts, sleepFn = sleep) 
       if (!/\/player\.html\/+\?/i.test(content)) { counts.skipped++; continue; }
       const fixedContent = normalizePlayerUrlsInHtml(content);
       const payload = { kind: 'blogger#post', blog: { id: blogId }, title: post.title || '', content: fixedContent, labels: post.labels || [] };
-      if (post.searchDescription) payload.searchDescription = post.searchDescription;
       if (post.published) payload.published = post.published;
       await bloggerWrite(token, blogId, post.id, payload);
       counts.updated++;
