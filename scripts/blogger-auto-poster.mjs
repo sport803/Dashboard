@@ -16,7 +16,8 @@ import { pathToFileURL } from 'node:url';
 const BLOGGER_API = 'https://www.googleapis.com/blogger/v3';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const ESPN_API = 'https://site.api.espn.com/apis/site/v2/sports';
-const PLAYER_BASE = process.env.PLAYER_BASE_URL || 'https://www.sport803.online/p/player.html';
+function normalizePlayerBase(value) { return text(value).replace(/\/+$/, ''); }
+const PLAYER_BASE = normalizePlayerBase(process.env.PLAYER_BASE_URL || 'https://www.sport803.online/p/player.html');
 const PPVTV_MATCHES_API = 'https://august.ppvtv.icu/api/matches.json';
 const ONEBALL_LIST_URL = 'https://oneball.live/list.json';
 const TSDB_API = 'https://www.thesportsdb.com/api/v1/json/3';
@@ -271,6 +272,9 @@ function pairMatch(event, home, away) {
 
 function sourceUrl(value) { return /^https:\/\//i.test(text(value)) ? text(value) : ''; }
 function oneBallUrl(matchId) { return `https://oneball.live/live/${encodeURIComponent(String(matchId).replace(/\.html?$/i, ''))}.html`; }
+function normalizePlayerUrlsInHtml(html) {
+  return String(html || '').replace(/((?:https?:\/\/)[^"'<>\s]+\/player\.html)\/+\?/gi, '$1?');
+}
 function sports803PlayerUrl(sources) {
   const one = sources.find(source => source.type === 'one');
   const mora = sources.find(source => source.type === 'mora' || source.type === 'hls');
@@ -279,7 +283,7 @@ function sports803PlayerUrl(sources) {
   if (one?.url) params.push(`one=${one.url}`);
   else if (mora?.url) params.push(`mora=${encodeURIComponent(mora.url)}`);
   embeds.forEach(source => { if (source.url) params.push(`embed=${encodeURIComponent(source.url)}`); });
-  return params.length ? `${PLAYER_BASE}?${params.join('&')}` : '';
+  return params.length ? normalizePlayerUrlsInHtml(`${PLAYER_BASE}?${params.join('&')}`) : '';
 }
 async function loadExternalSources() {
   const result = { oneball: [], ppv: [] };
@@ -409,8 +413,9 @@ function previewHtml(event, streams) { return dashboardSections(event, 'preview'
 function highlightsHtml(event, streams) { const links = replayLinks(event); return dashboardSections(event, 'highlights') + playerIframe(event, links.length ? links : streams); }
 /** Post bodies store the player URL HTML-escaped (& -> &amp;), so compare against both forms. */
 function contentHasPlayer(content, player) {
-  const body = String(content || '');
-  return body.includes(htmlEscape(player)) || body.includes(player);
+  const body = normalizePlayerUrlsInHtml(content);
+  const wanted = normalizePlayerUrlsInHtml(player);
+  return body.includes(htmlEscape(wanted)) || body.includes(wanted);
 }
 
 // ============================================================================
@@ -530,6 +535,35 @@ async function getPostBody(token, blogId, postId) {
   const data = await getJson(`${BLOGGER_API}/blogs/${encodeURIComponent(blogId)}/posts/${encodeURIComponent(postId)}?${query}`, { headers: { authorization: `Bearer ${token}` } });
   return typeof data.content === 'string' ? data.content : '';
 }
+async function getPostForRepair(token, blogId, postId) {
+  const query = new URLSearchParams({ fetchBodies: 'true', fields: 'id,title,content,labels,published,searchDescription' });
+  return getJson(`${BLOGGER_API}/blogs/${encodeURIComponent(blogId)}/posts/${encodeURIComponent(postId)}?${query}`, { headers: { authorization: `Bearer ${token}` } });
+}
+async function repairMalformedPlayerUrls(token, blogId, posts, sleepFn = sleep) {
+  const counts = { scanned: 0, updated: 0, skipped: 0, failed: 0 };
+  for (const listed of posts) {
+    counts.scanned++;
+    try {
+      const post = await getPostForRepair(token, blogId, listed.id);
+      const content = String(post.content || '');
+      if (!/\/player\.html\/+\?/i.test(content)) { counts.skipped++; continue; }
+      const fixedContent = normalizePlayerUrlsInHtml(content);
+      const payload = { kind: 'blogger#post', blog: { id: blogId }, title: post.title || '', content: fixedContent, labels: post.labels || [] };
+      if (post.searchDescription) payload.searchDescription = post.searchDescription;
+      if (post.published) payload.published = post.published;
+      await bloggerWrite(token, blogId, post.id, payload);
+      counts.updated++;
+      console.log(`repaired ${post.id}: ${post.title || '(untitled)'}`);
+      logEvent({ action: 'repaired-player-url', postId: post.id, title: post.title || '' });
+      await sleepFn(350);
+    } catch (error) {
+      counts.failed++;
+      console.error(`repair failed ${listed.id}: ${error.message}`);
+      logEvent({ action: 'repair-failed', postId: listed.id, error: error.message });
+    }
+  }
+  return counts;
+}
 async function bloggerWrite(token, blogId, postId, payload) {
   const url = postId ? `${BLOGGER_API}/blogs/${encodeURIComponent(blogId)}/posts/${encodeURIComponent(postId)}` : `${BLOGGER_API}/blogs/${encodeURIComponent(blogId)}/posts/`;
   return withRetry(async () => {
@@ -648,6 +682,7 @@ async function needsUpdate(existing, { final, desiredPlayer }, ctx) {
   if (final && !(existing.labels || []).includes('Highlights')) return true;
   if (!desiredPlayer) return false;
   if (typeof existing.content !== 'string') existing.content = await getPostBody(ctx.token, ctx.blogId, existing.id);
+  if (/\/player\.html\/+\?/i.test(existing.content)) return true;
   return !contentHasPlayer(existing.content, desiredPlayer);
 }
 
@@ -706,6 +741,14 @@ async function processEvents(events, ctx) {
 
 async function main() {
   const config = loadConfig(); // validates env + timezone before any network call
+  if (process.env.REPAIR_PLAYER_SLASHES === '1' || process.env.REPAIR_PLAYER_SLASHES === 'true') {
+    const token = await accessToken(config);
+    const posts = await listPosts(token, config.blogId);
+    const counts = await repairMalformedPlayerUrls(token, config.blogId, posts);
+    console.log(JSON.stringify({ mode: 'repair-player-slashes', ...counts }));
+    if (counts.failed > 0) process.exitCode = 1;
+    return;
+  }
   const allEvents = await attachExternalSources(await fetchDashboardEvents());
   // Dashboard cards are valid events before an external stream is resolved.
   const events = allEvents.filter(event => !isDead(event) && (isToday(event) || (event.type === 'race' && (event.source === 'ESPN' || event.source === 'TheSportsDB'))) && matchesConfiguredLeague(event));
@@ -740,7 +783,7 @@ export {
   attachExternalSources, buildFeedIndex, replayLinks, eventKey, markerFor, labelsFor, playerUrlFor,
   dashboardSections, raceSections, previewSections, highlightsSections, contentHasPlayer,
   teamLogoUrl, saveLogoCache, resetLogoCache, logoMarkup, thumbnailSvg, uploadImgBb,
-  accessToken, listPosts, getPostBody, bloggerWrite, processEvents, parseDashboardEvent, fetchLeague, fetchDashboardEvents, fetchRacingFromTSDB, leagueFetchStatus, leagueFetchSource
+  accessToken, listPosts, getPostBody, getPostForRepair, repairMalformedPlayerUrls, bloggerWrite, processEvents, parseDashboardEvent, fetchLeague, fetchDashboardEvents, fetchRacingFromTSDB, leagueFetchStatus, leagueFetchSource, normalizePlayerBase, normalizePlayerUrlsInHtml
 };
 
 const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;

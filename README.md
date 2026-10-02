@@ -18,6 +18,8 @@ Normal events with a valid scheduled start time dated **today** are eligible. Ra
 
 For a match with a OneBall listing, the generated article contains a player iframe such as `https://www.sport803.online/p/player.html?one=https://oneball.live/live/<match-id>.html`. If August PPV has the same fixture, its `embed=` source is added to that same player URL as a backup/source. The Action uses the stable OneBall match page rather than expiring raw signal URLs.
 
+Player URLs are normalized before generation and comparison, so the Action uses `player.html?` and never `player.html//?`. To repair existing Blogger posts from the earlier malformed format, run **Actions → Blogger event auto-poster → Run workflow** and enable the `repair_player_slashes` input. That mode scans existing posts, updates only affected iframe bodies, and does not create new posts.
+
 The publisher uses bounded HTTP timeouts and retries for transient feed, logo, ImgBB, OAuth, and Blogger failures. It caches successful team-logo lookups between runs, validates its environment before making network calls, limits Blogger labels to 20, fetches existing post bodies only when a player-link comparison is needed, and reports per-event failures without preventing other events from being processed.
 
 ### Racing event discovery

@@ -2,6 +2,12 @@ name: Blogger event auto-poster
 
 on:
   workflow_dispatch:
+    inputs:
+      repair_player_slashes:
+        description: 'Repair existing Blogger iframe URLs containing player.html//?'
+        required: false
+        default: 'false'
+        type: boolean
   schedule:
     - cron: '*/5 * * * *'
 
@@ -47,4 +53,5 @@ jobs:
           EVENT_TIMEZONE: ${{ vars.EVENT_TIMEZONE }}
           AUTO_POST_LEAGUES: ${{ vars.AUTO_POST_LEAGUES }}
           PLAYER_BASE_URL: https://www.sport803.online/p/player.html
+          REPAIR_PLAYER_SLASHES: ${{ inputs.repair_player_slashes }}
         run: node scripts/blogger-auto-poster.mjs
