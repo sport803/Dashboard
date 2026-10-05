@@ -28,6 +28,10 @@ The dashboard and Action now use a three-day window (target date ±1 day) and de
 
 The workflow supports event data for all Dashboard leagues. The racing detection aliases include **MotoGP, NASCAR, WRC, IMSA, and Porsche Carrera Cup**.
 
+### Player-level article enrichment
+
+For soccer, basketball, and hockey matches, the Action and dashboard can enrich articles from the ESPN summary endpoint with verified starting players, scorers, minutes, cards, and substitutions. Empty or unavailable fields are omitted; racing events are intentionally skipped. ESPN is primary and TheSportsDB is a bounded fallback. The Action processes at most 80 events per run with concurrency 4 and no more than 20 TheSportsDB player-data calls. Set the Actions variable `ENRICH_PLAYER_DATA=0` to disable enrichment during a rate-limit emergency; dry runs can use `ENRICH_PLAYER_DATA=1` to print per-event enrichment status.
+
 ### Required GitHub repository secrets
 
 Add these under **Settings → Secrets and variables → Actions → New repository secret**:

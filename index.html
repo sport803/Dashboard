@@ -2035,6 +2035,10 @@ button:disabled { opacity: .4; cursor: not-allowed; transform: none !important; 
           <input type="checkbox" id="cfg-embed-streams-in-post" onchange="saveCFG()"><div class="tslider"></div>
           <span style="text-transform:none;letter-spacing:0;color:var(--text)">Auto-embed iframe in Posts</span>
         </label>
+        <label class="toggle" style="display:flex;align-items:center;gap:8px;font-size:.8rem;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:9px 11px">
+          <input type="checkbox" id="cfg-enrich-player-data" onchange="saveCFG()"><div class="tslider"></div>
+          <span style="text-transform:none;letter-spacing:0;color:var(--text)">Enrich player data <span style="color:var(--blue);font-size:.65rem">(lineups, scorers, cards)</span></span>
+        </label>
       </div>
       <div class="form-group">
         <label>DDKanqu Mapping Table — one per line: <span style="color:var(--blue);font-weight:400">Team A vs Team B = 33969</span></label>
@@ -2227,14 +2231,14 @@ let CFG = {
   firebaseEventsPath: EVENT_FIREBASE_EVENTS_PATH,
   firebaseChannelsPath: EVENT_FIREBASE_CHANNELS_PATH,
   firebasePostLogPath: EVENT_FIREBASE_POST_LOG_PATH,
-  autoFetchStreams: false, enableDdkanqu: false, enableOneTV: false, enablePPVTV: true, embedStreamsInPost: true,
+  autoFetchStreams: false, enableDdkanqu: false, enableOneTV: false, enablePPVTV: true, embedStreamsInPost: true, enrichPlayerData: true,
   ddkanquMappingsRaw: '',
   deepseekKey: '', deepseekModel: 'claude-sonnet-4-20250514', deepseekTone: '', deepseekLength: 'medium',
   ytApiKey: ''
 };
 let LOGO_OVERRIDES = {}, LOGO_CACHE = {};
 let allEvents = [], channels = [], postLog = {};
-let leagueFetchStatus = {}, leagueFetchSource = {}, tsdbRacingDayCache = new Map();
+let leagueFetchStatus = {}, leagueFetchSource = {}, tsdbRacingDayCache = new Map(), playerDataCache = new Map();
 let accessToken = null, editingCH = null;
 let bloggerUser = null, bloggerBlogs = [], bloggerTokenClient = null;
 let editingPostId = null, editingEventKey = null;
@@ -2378,6 +2382,7 @@ function saveCFG() {
   CFG.enableOneTV = document.getElementById('cfg-enable-onetv')?.checked || false;
   CFG.enablePPVTV = document.getElementById('cfg-enable-ppvtv')?.checked ?? true;
   CFG.embedStreamsInPost = document.getElementById('cfg-embed-streams-in-post')?.checked ?? true;
+  CFG.enrichPlayerData = document.getElementById('cfg-enrich-player-data')?.checked ?? true;
   CFG.ddkanquMappingsRaw = v('cfg-ddkanqu-mappings');
   CFG.deepseekKey = v('cfg-deepseek-key');
   CFG.deepseekModel = document.getElementById('cfg-deepseek-model')?.value || 'claude-sonnet-4-20250514';
@@ -3157,6 +3162,7 @@ async function fetchAllEvents() {
   updateLeagueFetchStatus();
   toast('Resolving logos via TheSportsDB…', 'i');
   await enrichLogos(allEvents);
+  if (CFG.enrichPlayerData) { toast('Loading player data…', 'i'); await enrichEventsWithPlayerData(allEvents); }
   document.getElementById('st-events').textContent = allEvents.length;
   renderLeagueFilterPills();
   renderEventCards(allEvents);
@@ -3245,6 +3251,70 @@ function parseESPN(ev, league) {
     away: { name: away.team?.displayName || 'TBD', logo: getRawLogo(away), score: away.score ?? '' },
     status, startTime
   };
+}
+
+// v12: player-level enrichment. ESPN summary is primary; TheSportsDB is fallback.
+// TSDB free tier truncates arrays to 5 rows silently — cross-check timeline goals
+// against final score and mark complete:false when they disagree.
+function playerSideTemplate(name) { return { name: name || 'Team', starters: [], subs: [], scorers: [], cards: [], substitutions: [] }; }
+function playerName(value) { return value?.athlete?.displayName || value?.athlete?.fullName || value?.player?.displayName || value?.displayName || value?.strPlayer || ''; }
+function minuteText(value) { return value?.displayValue || value?.text || value?.strTime || value?.intTime || ''; }
+function playerTeamId(value) { return String(value?.team?.id || value?.team?.uid || value?.teamId || ''); }
+function newPlayerData(ev, source = null) { return { source, complete: null, home: playerSideTemplate(ev.home?.name), away: playerSideTemplate(ev.away?.name), timeline: [], dangerMen: { home: [], away: [] }, teamNews: { home: [], away: [] } }; }
+function playerDataSportSupported(ev) { return ['soccer', 'basketball', 'hockey'].includes(String(ev.league?.sport || '').toLowerCase()); }
+function sideForPlayerData(data, teamId, fallbackIndex = 0) { return teamId && data._teamIds?.[teamId] ? data[data._teamIds[teamId]] : (fallbackIndex ? data.away : data.home); }
+function parseESPNPlayerData(ev, summary) {
+  const data = newPlayerData(ev, 'espn');
+  const competitors = summary?.header?.competitions?.[0]?.competitors || summary?.header?.competitions?.[0]?.competitors || [];
+  const ids = competitors.map(c => String(c.id || c.team?.id || ''));
+  data._teamIds = {}; if (ids[0]) data._teamIds[ids[0]] = 'home'; if (ids[1]) data._teamIds[ids[1]] = 'away';
+  const rosters = Array.isArray(summary?.rosters) ? summary.rosters : [];
+  rosters.forEach((entry, index) => {
+    const side = data._teamIds[String(entry.team?.id || entry.teamId || '')] ? data._teamIds[String(entry.team?.id || entry.teamId || '')] : (index ? 'away' : 'home');
+    (entry.roster || entry.players || []).forEach(row => { const name = playerName(row); if (!name) return; const item = { name, position: row.position?.abbreviation || row.position?.displayName || '', number: row.jersey || row.uniformNumber || '', starter: row.starter === true, stats: row.stats || [] }; if (item.starter) data[side].starters.push(item); else data[side].subs.push(item); });
+  });
+  (summary?.keyEvents || []).forEach(event => {
+    const type = String(event.type?.text || event.type?.name || '').toLowerCase(), player = playerName(event.participants?.[0]) || playerName(event); if (!player) return;
+    const side = sideForPlayerData(data, playerTeamId(event), data.timeline.length % 2); const minute = minuteText(event.clock || event); const assist = playerName(event.participants?.[1]) || '';
+    const row = { minute, type, player, assist, team: side === data.home ? data.home.name : data.away.name };
+    if (/goal|point/.test(type)) { side.scorers.push(row); data.timeline.push(row); }
+    else if (/yellow|red|card|booking/.test(type)) side.cards.push(row);
+    else if (/substitution|sub/.test(type)) side.substitutions.push(row);
+  });
+  const boxPlayers = summary?.boxscore?.players || [];
+  boxPlayers.forEach((group, index) => { const side = index ? data.away : data.home; (group.statistics || []).forEach(stat => (stat.athletes || stat.players || []).forEach(row => { const name = playerName(row); if (name && row.starter && !side.starters.some(x => x.name === name)) side.starters.push({ name, starter: true, stats: row.stats || [] }); })); });
+  [data.home, data.away].forEach((side, index) => { const scorer = side.scorers[0]; if (scorer?.player) data.dangerMen[index ? 'away' : 'home'].push({ name: scorer.player, reason: scorer.minute ? 'scored at ' + scorer.minute : 'scored in this match' }); });
+  data.complete = Boolean(data.home.starters.length || data.away.starters.length || data.timeline.length);
+  delete data._teamIds;
+  return data;
+}
+async function hydrateEventPlayerData(ev, options = {}) {
+  if (!ev || ev.type !== 'match' || !CFG.enrichPlayerData || !playerDataSportSupported(ev)) return null;
+  const key = String(ev.id || evKey(ev)); if (!options.force && playerDataCache.has(key)) { ev.playerData = playerDataCache.get(key); return ev.playerData; }
+  try {
+    const url = ESPN + '/' + (ev.league?.sport || 'soccer') + '/' + (ev.league?.slug || '') + '/summary?event=' + encodeURIComponent(ev.id);
+    const response = await fetch(url); if (!response.ok) throw new Error('ESPN summary HTTP ' + response.status);
+    const summary = await response.json(); const data = parseESPNPlayerData(ev, summary);
+    if (data.complete || data.home.starters.length || data.away.starters.length) { playerDataCache.set(key, data); ev.playerData = data; return data; }
+    throw new Error('ESPN summary contained no player rows');
+  } catch (error) {
+    try {
+      const [timelineResponse, lineupResponse] = await Promise.all([fetch(TSDB + '/event_timeline.php?id=' + encodeURIComponent(ev.id)), fetch(TSDB + '/event_lineup.php?id=' + encodeURIComponent(ev.id))]);
+      const timelinePayload = timelineResponse.ok ? await timelineResponse.json() : null, lineupPayload = lineupResponse.ok ? await lineupResponse.json() : null;
+      const data = newPlayerData(ev, 'tsdb'), timeline = timelinePayload?.timeline || timelinePayload?.events || [], lineup = lineupPayload?.lineup || lineupPayload?.players || [];
+      (Array.isArray(timeline) ? timeline : []).forEach(row => { const name = playerName(row); if (!name) return; const side = /away/i.test(row.strHome || row.strTeam || '') ? data.away : data.home, type = String(row.strType || row.strEvent || '').toLowerCase(), item = { player: name, minute: row.intTime || row.strTime || '', assist: row.strAssist || '', type, team: side.name }; if (/goal|score/.test(type)) { side.scorers.push(item); data.timeline.push(item); } else if (/card|yellow|red/.test(type)) side.cards.push(item); else if (/subst/.test(type)) side.substitutions.push(item); });
+      (Array.isArray(lineup) ? lineup : []).forEach((row, index) => { const name = playerName(row); if (name) (index % 2 ? data.away : data.home).starters.push({ name, starter: true, position: row.strPosition || row.position || '' }); });
+      const score = [ev.home?.score, ev.away?.score].map(Number); data.complete = score.every(Number.isFinite) && data.timeline.length ? data.timeline.filter(x => /goal|score/.test(x.type)).length === score.reduce((a, b) => a + b, 0) : false; [data.home, data.away].forEach((side, index) => { const scorer = side.scorers[0]; if (scorer) data.dangerMen[index ? 'away' : 'home'].push({ name: scorer.player, reason: 'scored in the available match timeline' }); });
+      if (data.timeline.length || data.home.starters.length || data.away.starters.length) { playerDataCache.set(key, data); ev.playerData = data; return data; }
+    } catch (fallbackError) { console.warn('[Player data] TSDB fallback: ' + fallbackError.message); }
+    console.warn('[Player data] ' + (ev.home?.name || ev.name || ev.id) + ': ' + error.message); playerDataCache.set(key, null); ev.playerData = null; return null;
+  }
+}
+async function enrichEventsWithPlayerData(events) {
+  if (!CFG.enrichPlayerData) return events;
+  const matches = events.filter(ev => ev.type === 'match').slice(0, 80);
+  for (let i = 0; i < matches.length; i += 4) { await Promise.allSettled(matches.slice(i, i + 4).map(ev => hydrateEventPlayerData(ev))); await new Promise(resolve => setTimeout(resolve, 120)); }
+  return events;
 }
 
 // ============================================================
@@ -3406,6 +3476,24 @@ function articleHasHeading(html, labels) {
   const pattern = labels.map(label => label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
   return new RegExp('<h[1-6][^>]*>[^<]*(' + pattern + ')[^<]*</h[1-6]>', 'i').test(String(html || ''));
 }
+// v12: render only verified player data; missing fields produce no empty headings.
+function playerDataArticleSections(ev, mode) {
+  const pd = ev?.playerData; if (!pd || ev.type !== 'match') return [];
+  const esc = value => escapeLogoHtml(String(value || ''));
+  const sections = [], home = pd.home || {}, away = pd.away || {};
+  const homeXI = (home.starters || []).map(x => x.name).filter(Boolean), awayXI = (away.starters || []).map(x => x.name).filter(Boolean);
+  if (homeXI.length || awayXI.length) sections.push([['Starting XIs', 'Probable XI'], '<h2>' + ((pd.complete && STATUS.isFinal(ev.status)) ? 'Confirmed Starting XIs' : 'Probable XIs') + '</h2><p><strong>' + esc(home.name) + ':</strong> ' + esc(homeXI.join(', ')) + '<br><strong>' + esc(away.name) + ':</strong> ' + esc(awayXI.join(', ')) + '</p>']);
+  const goals = [...(home.scorers || []).map(x => ({ ...x, team: home.name })), ...(away.scorers || []).map(x => ({ ...x, team: away.name }))];
+  if (goals.length) sections.push([['Goal Scorers', 'Scorers'], '<h2>Goal Scorers</h2><p>' + [home, away].map(side => { const rows = (side.scorers || []).map(x => esc(x.player) + (x.minute ? ' ' + esc(x.minute) : '') + (x.assist ? ' (assist: ' + esc(x.assist) + ')' : '')).join(', '); return rows ? '<strong>' + esc(side.name) + ':</strong> ' + rows : ''; }).filter(Boolean).join('<br>') + '</p>' + (pd.source === 'tsdb' && pd.complete === false ? '<p><em>Full match timeline unavailable; the available event details may be incomplete.</em></p>' : '')]);
+  const cards = [...(home.cards || []).map(x => ({ ...x, team: home.name })), ...(away.cards || []).map(x => ({ ...x, team: away.name }))];
+  const subs = [...(home.substitutions || []).map(x => ({ ...x, team: home.name })), ...(away.substitutions || []).map(x => ({ ...x, team: away.name }))];
+  if (cards.length || subs.length) sections.push([['Bookings & Substitutions'], '<h2>Bookings &amp; Substitutions</h2><p>' + [...cards.map(x => '🟨 ' + esc(x.player) + (x.minute ? ' ' + esc(x.minute) : '') + ' (' + esc(x.team) + ')'), ...subs.map(x => '↔ ' + esc(x.player) + (x.minute ? ' ' + esc(x.minute) : '') + ' (' + esc(x.team) + ')')].join('<br>') + '</p>']);
+  const dangerHome = (pd.dangerMen?.home || []).filter(x => x.name && x.reason), dangerAway = (pd.dangerMen?.away || []).filter(x => x.name && x.reason);
+  if (dangerHome.length || dangerAway.length) sections.push([['Danger Men', 'Key Players'], '<h2>Danger Men</h2><p>' + [...dangerHome.map(x => '<strong>' + esc(x.name) + ':</strong> ' + esc(x.reason)), ...dangerAway.map(x => '<strong>' + esc(x.name) + ':</strong> ' + esc(x.reason))].join('<br>') + '</p>']);
+  const news = [...(pd.teamNews?.home || []).map(x => esc(x)), ...(pd.teamNews?.away || []).map(x => esc(x))].filter(Boolean);
+  if (news.length) sections.push([['Team News'], '<h2>Team News</h2><p>' + news.join('<br>') + '</p>']);
+  return sections;
+}
 function buildAutoFilledArticleSections(ev, mode = 'preview') {
   if (!ev) return '';
   const h = ev.home?.name || ev.name || 'Home';
@@ -3433,7 +3521,7 @@ function buildAutoFilledArticleSections(ev, mode = 'preview') {
     [['How to Watch'], '<h2>How to Watch</h2><p>Follow this Sports 803 article for the latest event details and use the embedded player when the stream is available. No sign-up is required to check the viewing information and match updates.</p>'],
     [['Frequently Asked Questions', 'FAQ'], '<h2>Frequently Asked Questions</h2><p><strong>When is the event?</strong><br>The latest scheduled time is listed in the Match Details section. <strong>Where can I watch?</strong><br>Use the Sports 803 player and stream information attached to this article.</p>']
   ];
-  return sections;
+  return playerDataArticleSections(ev, mode).concat(sections);
 }
 function ensureAutoFilledArticleSections(body, ev, mode = 'preview') {
   let html = String(body || '').trim();
@@ -4017,7 +4105,7 @@ function renderMatchCard(ev) {
     <div style="display:flex;flex-direction:column;align-items:center"><div class="ec-vs">${score}</div><div class="ec-time">${escapeLogoHtml(ts)}</div></div>
     <div class="ec-team">${aChip}<div class="ec-team-name">${awayName}</div></div></div>
     ${postLink}
-    <div class="ec-actions"><button class="btn-red btn-sm" onclick="genAndFill('${sid}')">✍️ Gen</button><button class="btn-blue btn-sm" onclick="quickPostEv('${sid}')">📤 Post</button><button class="btn-gold btn-sm" onclick="genThumbForEv('${sid}')">🖼️ Thumb</button><button class="btn-orange btn-sm" onclick="quickPostHighlights('${sid}')">🎬 HL</button></div></div>`;
+    <div class="ec-actions"><button class="btn-red btn-sm" onclick="genAndFill('${sid}')">✍️ Gen</button><button class="btn-blue btn-sm" onclick="quickPostEv('${sid}')">📤 Post</button><button class="btn-gold btn-sm" onclick="genThumbForEv('${sid}')">🖼️ Thumb</button><button class="btn-orange btn-sm" onclick="quickPostHighlights('${sid}')">🎬 HL</button><button class="btn-ghost btn-sm" onclick="refreshEventPlayerData('${sid}')">👤 Data</button></div></div>`;
 }
 
 function raceDateLabel(ev) {
@@ -4054,6 +4142,10 @@ function getRaceImg(ev) {
 // ============================================================
 //  PER-EVENT ACTIONS (genAndFill, quickPostEv, etc.)
 // ============================================================
+async function refreshEventPlayerData(sid) {
+  const ev = findEv(sid); if (!ev || ev.type !== 'match') return;
+  toast('Refreshing player data…', 'i'); await hydrateEventPlayerData(ev, { force: true }); renderEventCards(allEvents); toast(ev.playerData ? 'Player data refreshed ✓' : 'No player data available', ev.playerData ? 's' : 'w');
+}
 async function genAndFill(sid) {
   const ev = findEv(sid);
   if (!ev) { toast('Event not found', 'e'); return; }
@@ -6104,6 +6196,7 @@ function applyConfigToUI() {
   if (document.getElementById('cfg-enable-onetv')) document.getElementById('cfg-enable-onetv').checked = CFG.enableOneTV || false;
   if (document.getElementById('cfg-enable-ppvtv')) document.getElementById('cfg-enable-ppvtv').checked = CFG.enablePPVTV !== false;
   if (document.getElementById('cfg-embed-streams-in-post')) document.getElementById('cfg-embed-streams-in-post').checked = CFG.embedStreamsInPost !== false;
+  if (document.getElementById('cfg-enrich-player-data')) document.getElementById('cfg-enrich-player-data').checked = CFG.enrichPlayerData !== false;
   set('cfg-deepseek-key', CFG.deepseekKey || '');
   set('cfg-deepseek-tone', CFG.deepseekTone || '');
   if (document.getElementById('cfg-deepseek-model')) document.getElementById('cfg-deepseek-model').value = CFG.deepseekModel || 'claude-sonnet-4-20250514';

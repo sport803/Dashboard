@@ -23,6 +23,11 @@ const ONEBALL_LIST_URL = 'https://oneball.live/list.json';
 const TSDB_API = 'https://www.thesportsdb.com/api/v1/json/3';
 const IMGBB_API = 'https://api.imgbb.com/1/upload';
 const USER_AGENT = 'Sports803-Blogger-AutoPoster/1.0';
+const PLAYER_DATA_MAX_EVENTS = 80;
+const PLAYER_DATA_CONCURRENCY = 4;
+const PLAYER_DATA_TSDB_MAX_CALLS = 20;
+const playerDataCache = new Map(), tsdbPlayerCache = new Map();
+let tsdbPlayerCalls = 0;
 
 const FETCH_TIMEOUT_MS = 15_000;
 const MAX_LABELS = 20; // Blogger's per-post label limit
@@ -400,10 +405,25 @@ function previewSections(event) {
   const { h, a, fixture, league, kickoff } = sectionVars(event);
   return `<h2>Match Overview</h2><p>${fixture} take on each other in ${league}. This article covers the event context, the main storylines, and the viewing information readers need before the action begins.</p><h2>Match Details</h2><p><strong>Event:</strong> ${fixture}<br><strong>Competition:</strong> ${league}<br><strong>Kickoff:</strong> ${kickoff}</p><h2>Team Form</h2><p>${h} will aim to turn preparation and recent performances into a strong start, while ${a || 'the opposition'} will look for the same. Lineups, availability, confidence, and recent chances will shape the form picture.</p><h2>Head-to-Head</h2><p>The history between these sides adds context to the occasion, but current form and match-day execution remain decisive. Previous meetings can reveal recurring tactical patterns and areas where either side may gain an advantage.</p><h2>Key Players to Watch</h2><p>Watch for the players who can create separation, progress possession, win duels, and make the final pass. Both sides will look for individual moments to change the game.</p><h2>Match Analysis</h2><p>Expect a tactical contest built around possession, pressing, defensive shape, and transitions. The team that manages space between the lines and reacts best after turnovers should create the clearest openings.</p><h2>How to Watch</h2><p>Follow this Sports 803 article for the latest event details and use the embedded player when the stream is available.</p><h2>Frequently Asked Questions</h2><p><strong>When is the event?</strong><br>The latest scheduled time is listed in the Match Details section. <strong>Where can I watch?</strong><br>Use the Sports 803 player and stream information attached to this article.</p>`;
 }
+function playerDataSections(event) {
+  const pd = event?.playerData; if (!pd || isRace(event)) return '';
+  const esc = htmlEscape, sections = [], home = pd.home || {}, away = pd.away || '';
+  const hxi = (home.starters || []).map(x => x.name).filter(Boolean), axi = (away.starters || []).map(x => x.name).filter(Boolean);
+  if (hxi.length || axi.length) sections.push(`<h2>${pd.complete && isFinal(event) ? 'Confirmed Starting XIs' : 'Probable XIs'}</h2><p><strong>${esc(home.name || homeName(event))}:</strong> ${esc(hxi.join(', '))}<br><strong>${esc(away.name || awayName(event))}:</strong> ${esc(axi.join(', '))}</p>`);
+  const goals = [home, away].map(side => { const rows = (side.scorers || []).map(x => `${esc(x.player)}${x.minute ? ` ${esc(x.minute)}` : ''}${x.assist ? ` (assist: ${esc(x.assist)})` : ''}`).join(', '); return rows ? `<strong>${esc(side.name)}:</strong> ${rows}` : ''; }).filter(Boolean);
+  if (goals.length) sections.push(`<h2>Goal Scorers</h2><p>${goals.join('<br>')}</p>${pd.source === 'tsdb' && pd.complete === false ? '<p><em>Full match timeline unavailable; the available event details may be incomplete.</em></p>' : ''}`);
+  const cards = [home, away].flatMap(side => (side.cards || []).map(x => `🟨 ${esc(x.player)}${x.minute ? ` ${esc(x.minute)}` : ''} (${esc(side.name)})`).concat((side.substitutions || []).map(x => `↔ ${esc(x.player)}${x.minute ? ` ${esc(x.minute)}` : ''} (${esc(side.name)})`)));
+  if (cards.length) sections.push(`<h2>Bookings &amp; Substitutions</h2><p>${cards.join('<br>')}</p>`);
+  const danger = [...(pd.dangerMen?.home || []), ...(pd.dangerMen?.away || [])].filter(x => x.name && x.reason);
+  if (danger.length) sections.push(`<h2>Danger Men</h2><p>${danger.map(x => `<strong>${esc(x.name)}:</strong> ${esc(x.reason)}`).join('<br>')}</p>`);
+  const news = [...(pd.teamNews?.home || []), ...(pd.teamNews?.away || [])].filter(Boolean);
+  if (news.length) sections.push(`<h2>Team News</h2><p>${news.map(esc).join('<br>')}</p>`);
+  return sections.join('');
+}
 function dashboardSections(event, mode) {
   if (isRace(event)) return raceSections(event);
-  if (mode === 'highlights') return highlightsSections(event);
-  return previewSections(event);
+  const base = mode === 'highlights' ? highlightsSections(event) : previewSections(event);
+  return playerDataSections(event) + base;
 }
 function playerIframe(event, streams) {
   const player = playerUrlFor(event, streams);
@@ -628,6 +648,61 @@ function parseDashboardEvent(event, league) {
   if (league.type === 'race') return { id: event.id, league, type: 'race', name: event.name || event.shortName || `${league.name} event`, status, startTime: event.date, endTime: event.endDate || competition.endDate || null, source: 'ESPN' };
   return { id: event.id, league, type: 'match', home: { name: teamName(home), logo: logo(home), score: home.score ?? '' }, away: { name: teamName(away), logo: logo(away), score: away.score ?? '' }, status, startTime: event.date };
 }
+
+// v12: player-level enrichment. ESPN summary is primary; TheSportsDB is fallback.
+// TSDB free tier truncates arrays to 5 rows silently — cross-check timeline goals
+// against final score and mark complete:false when they disagree.
+function playerSide(name) { return { name: name || 'Team', starters: [], subs: [], scorers: [], cards: [], substitutions: [] }; }
+function playerName(value) { return value?.athlete?.displayName || value?.athlete?.fullName || value?.player?.displayName || value?.displayName || value?.strPlayer || ''; }
+function playerMinute(value) { return value?.displayValue || value?.text || value?.strTime || value?.intTime || ''; }
+function emptyPlayerData(event, source = null) { return { source, complete: null, home: playerSide(homeName(event)), away: playerSide(awayName(event)), timeline: [], dangerMen: { home: [], away: [] }, teamNews: { home: [], away: [] } }; }
+function playerDataSportSupported(event) { return ['soccer', 'basketball', 'hockey'].includes(text(event.league?.sport).toLowerCase()); }
+function parseSummaryPlayerData(event, summary) {
+  const data = emptyPlayerData(event, 'espn'), competitors = summary?.header?.competitions?.[0]?.competitors || [], teamIds = {};
+  competitors.forEach((item, index) => { const id = String(item.id || item.team?.id || ''); if (id) teamIds[id] = index ? 'away' : 'home'; });
+  (Array.isArray(summary?.rosters) ? summary.rosters : []).forEach((group, index) => {
+    const side = teamIds[String(group.team?.id || group.teamId || '')] || (index ? 'away' : 'home');
+    for (const row of group.roster || group.players || []) { const name = playerName(row); if (!name) continue; const item = { name, starter: row.starter === true, position: row.position?.abbreviation || row.position?.displayName || '', number: row.jersey || row.uniformNumber || '', stats: row.stats || [] }; (item.starter ? data[side].starters : data[side].subs).push(item); }
+  });
+  (summary?.keyEvents || []).forEach(item => {
+    const type = text(item.type?.text || item.type?.name).toLowerCase(), player = playerName(item.participants?.[0]) || playerName(item); if (!player) return;
+    const teamId = String(item.team?.id || item.team?.uid || item.teamId || ''), side = teamIds[teamId] || (data.timeline.length % 2 ? 'away' : 'home');
+    const row = { player, minute: playerMinute(item.clock || item), assist: playerName(item.participants?.[1]) || '', type, team: data[side].name };
+    if (/goal|point/.test(type)) { data[side].scorers.push(row); data.timeline.push(row); } else if (/yellow|red|card|booking/.test(type)) data[side].cards.push(row); else if (/substitution|sub/.test(type)) data[side].substitutions.push(row);
+  });
+  [data.home, data.away].forEach((side, index) => { const scorer = side.scorers[0]; if (scorer?.player) data.dangerMen[index ? 'away' : 'home'].push({ name: scorer.player, reason: scorer.minute ? `scored at ${scorer.minute}` : 'scored in this match' }); });
+  data.complete = Boolean(data.home.starters.length || data.away.starters.length || data.timeline.length); return data;
+}
+async function tsdbPlayerJson(kind, eventId) {
+  const key = `${kind}:${eventId}`; if (tsdbPlayerCache.has(key)) return tsdbPlayerCache.get(key);
+  if (tsdbPlayerCalls >= PLAYER_DATA_TSDB_MAX_CALLS) return null;
+  tsdbPlayerCalls++; const data = await getJson(`${TSDB_API}/${kind}.php?id=${encodeURIComponent(eventId)}`, { headers: { accept: 'application/json', 'user-agent': USER_AGENT } }).catch(() => null); tsdbPlayerCache.set(key, data); return data;
+}
+async function hydrateEventPlayerData(event, options = {}) {
+  if (!event || isRace(event) || !playerDataSportSupported(event) || process.env.ENRICH_PLAYER_DATA === '0') return null;
+  const key = String(event.id || eventKey(event, 0)); if (!options.force && playerDataCache.has(key)) { event.playerData = playerDataCache.get(key); return event.playerData; }
+  try {
+    const summary = await getJson(`${ESPN_API}/${event.league?.sport || 'soccer'}/${event.league?.slug || ''}/summary?event=${encodeURIComponent(event.id)}`, { headers: { accept: 'application/json', 'user-agent': USER_AGENT } });
+    const data = parseSummaryPlayerData(event, summary); playerDataCache.set(key, data); event.playerData = data; return data;
+  } catch (error) {
+    const timeline = await tsdbPlayerJson('event_timeline', event.id), lineup = await tsdbPlayerJson('event_lineup', event.id);
+    if (!timeline && !lineup) { console.warn(`[Player data] ${eventName(event)}: ${error.message}`); playerDataCache.set(key, null); return null; }
+    const data = emptyPlayerData(event, 'tsdb'), rows = timeline?.timeline || timeline?.events || timeline?.event || [];
+    for (const row of Array.isArray(rows) ? rows : []) { const name = playerName(row) || row.strPlayer || row.strPlayer2 || ''; if (!name) continue; const side = /away/i.test(row.strHome || row.strTeam || '') ? data.away : data.home; const type = text(row.strType || row.strEvent).toLowerCase(); const entry = { player: name, minute: row.intTime || row.strTime || '', assist: row.strAssist || '', type, team: side.name }; if (/goal|score/.test(type)) { side.scorers.push(entry); data.timeline.push(entry); } else if (/card|yellow|red/.test(type)) side.cards.push(entry); else if (/subst/.test(type)) side.substitutions.push(entry); }
+    const starters = lineup?.lineup || lineup?.players || lineup?.event_lineup || [];
+    (Array.isArray(starters) ? starters : []).forEach((row, index) => { const name = playerName(row); if (name) (index % 2 ? data.away : data.home).starters.push({ name, starter: true, position: row.strPosition || row.position || '' }); });
+    const score = [event.home?.score, event.away?.score].map(Number), goals = data.timeline.filter(item => /goal|score/.test(item.type)).length;
+    data.complete = score.every(Number.isFinite) ? goals === score.reduce((sum, value) => sum + value, 0) : false;
+    playerDataCache.set(key, data); event.playerData = data; return data;
+  }
+}
+async function enrichEventsWithPlayerData(events) {
+  if (process.env.ENRICH_PLAYER_DATA === '0') return events;
+  const matches = events.filter(event => event.type === 'match' && !isRace(event)).slice(0, PLAYER_DATA_MAX_EVENTS);
+  if (events.filter(event => event.type === 'match' && !isRace(event)).length > PLAYER_DATA_MAX_EVENTS) console.warn(`[Player data] cap reached at ${PLAYER_DATA_MAX_EVENTS} events`);
+  for (let i = 0; i < matches.length; i += PLAYER_DATA_CONCURRENCY) { await Promise.allSettled(matches.slice(i, i + PLAYER_DATA_CONCURRENCY).map(event => hydrateEventPlayerData(event))); await sleep(120); }
+  return events;
+}
 // v11: every broken source is logged; empty 200 responses remain valid empty leagues.
 async function fetchLeague(league, dates = eventDateWindow()) {
   const anchorDate = dates[1];
@@ -749,6 +824,7 @@ async function main() {
     return;
   }
   const allEvents = await attachExternalSources(await fetchDashboardEvents());
+  await enrichEventsWithPlayerData(allEvents);
   // Dashboard cards are valid events before an external stream is resolved.
   const events = allEvents.filter(event => !isDead(event) && (isToday(event) || (event.type === 'race' && (event.source === 'ESPN' || event.source === 'TheSportsDB'))) && matchesConfiguredLeague(event));
 
@@ -757,7 +833,7 @@ async function main() {
     try { sampleThumbnail = events[0] ? await thumbnailSvg(events[0], eventName(events[0]), isFinal(events[0])) : ''; }
     catch (error) { failed = 1; console.error(`[dry-run] thumbnail failed: ${error.message}`); }
     saveLogoCache();
-    console.log(JSON.stringify({ source: 'dashboard-espn', scanned: allEvents.length, eligible: events.length, failed, timezone: config.timeZone, thumbnail: { svgBytes: Buffer.byteLength(sampleThumbnail), embedsLogo: sampleThumbnail.includes('data:image/'), events: events.map((event, index) => ({ key: eventKey(event, index), title: eventName(event), league: leagueName(event), scheduled: startTime(event), final: isFinal(event), sources: event.externalSources || [], player: playerUrlFor(event, streamLinks(event)) })) } }));
+    console.log(JSON.stringify({ source: 'dashboard-espn', scanned: allEvents.length, eligible: events.length, failed, timezone: config.timeZone, playerData: events.map(event => ({ id: event.id, title: eventName(event), source: event.playerData?.source || null, complete: event.playerData?.complete ?? null, starters: (event.playerData?.home?.starters?.length || 0) + (event.playerData?.away?.starters?.length || 0), scorers: (event.playerData?.home?.scorers?.length || 0) + (event.playerData?.away?.scorers?.length || 0) })), thumbnail: { svgBytes: Buffer.byteLength(sampleThumbnail), embedsLogo: sampleThumbnail.includes('data:image/'), events: events.map((event, index) => ({ key: eventKey(event, index), title: eventName(event), league: leagueName(event), scheduled: startTime(event), final: isFinal(event), sources: event.externalSources || [], player: playerUrlFor(event, streamLinks(event)) })) } }));
     if (failed) process.exitCode = 1;
     return;
   }
@@ -780,9 +856,9 @@ export {
   text, pick, htmlEscape, stableHash, isFinal, isDead, eventName, eventScore, leagueName, leagueId, canonicalLeague, isRace,
   localDate, isToday, streamLinks, teamKey, teamsMatch, pairMatch,
   attachExternalSources, buildFeedIndex, replayLinks, eventKey, markerFor, labelsFor, playerUrlFor,
-  dashboardSections, raceSections, previewSections, highlightsSections, contentHasPlayer,
+  dashboardSections, raceSections, previewSections, highlightsSections, playerDataSections, contentHasPlayer,
   teamLogoUrl, saveLogoCache, resetLogoCache, logoMarkup, thumbnailSvg, uploadImgBb,
-  accessToken, listPosts, getPostBody, getPostForRepair, repairMalformedPlayerUrls, bloggerWrite, processEvents, parseDashboardEvent, fetchLeague, fetchDashboardEvents, fetchRacingFromTSDB, leagueFetchStatus, leagueFetchSource, normalizePlayerBase, normalizePlayerUrlsInHtml
+  accessToken, listPosts, getPostBody, getPostForRepair, repairMalformedPlayerUrls, bloggerWrite, processEvents, parseDashboardEvent, hydrateEventPlayerData, enrichEventsWithPlayerData, fetchLeague, fetchDashboardEvents, fetchRacingFromTSDB, leagueFetchStatus, leagueFetchSource, normalizePlayerBase, normalizePlayerUrlsInHtml
 };
 
 const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
