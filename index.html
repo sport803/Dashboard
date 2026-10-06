@@ -2618,13 +2618,13 @@ const Compose = {
         html = `<h2>Match Preview</h2><p>${h} vs ${a} – all the build-up, team news, and tactical analysis.</p>`;
         break;
       case 'howtowatch':
-        html = `<h2>How To Watch</h2><p>📺 Watch free on Sports 803: <a href="${player}">${player}</a><br>No sign-up required.</p>`;
+        html = `<h2>How To Watch</h2><p>Check an authorized broadcaster or licensed replay in your region. Add the Sports 803 player only when a permitted source has been verified.</p>`;
         break;
       case 'faq':
-        html = `<div style="background:#0e1320;border:1px solid #1e2d45;border-radius:8px;padding:12px 16px;margin:16px 0"><h3 style="color:#4cc9f0;font-size:.9rem">❓ FAQ</h3><p><strong>Where can I watch ${h} vs ${a}?</strong><br>Watch free on Sports 803 – no subscription needed.</p></div>`;
+        html = `<div style="background:#0e1320;border:1px solid #1e2d45;border-radius:8px;padding:12px 16px;margin:16px 0"><h3 style="color:#4cc9f0;font-size:.9rem">❓ FAQ</h3><p><strong>Where can I watch ${h} vs ${a}?</strong><br>Use an authorized broadcaster or licensed replay in your region. Viewing availability can vary by location.</p></div>`;
         break;
       case 'cta':
-        html = `<div style="background:linear-gradient(135deg,#0e1320,#1a0020);border:2px solid #e63946;border-radius:12px;padding:20px;text-align:center;margin:16px 0"><h3 style="color:#fff">▶ Watch FREE on Sports 803</h3><a href="${player}" target="_blank" style="display:inline-block;background:#e63946;color:#fff;padding:10px 28px;border-radius:8px;text-decoration:none;font-weight:900">Watch Live Stream</a></div>`;
+        html = `<div style="background:linear-gradient(135deg,#0e1320,#1a0020);border:2px solid #e63946;border-radius:12px;padding:20px;text-align:center;margin:16px 0"><h3 style="color:#fff">▶ Viewing Information</h3><p style="color:#c8d2e2">Check an authorized broadcaster or licensed replay in your region. A Sports 803 player may be added when a permitted source is available.</p></div>`;
         break;
       case 'highlights':
         html = `<h2>Highlights Recap</h2><p>Relive the best moments from this thrilling encounter.</p>`;
@@ -2703,17 +2703,17 @@ function buildClaudePrompt(title, ev, isHighlights = false) {
   if (isHighlights && ev && ev.type === 'match') {
     const h = ev.home.name, a = ev.away.name, lg = ev.league.name;
     const score = ev.home.score !== '' ? h + ' ' + ev.home.score + '–' + ev.away.score + ' ' + a : '';
-    return 'You are a ' + tone + ' writing for Sports 803, a free sports streaming blog.\nWrite a highlights recap article for: ' + h + ' vs ' + a + ' — ' + lg + '.\n' + (score ? 'Final score: ' + score + '.\n' : '') + 'Requirements:\n- Approximately 400 words\n- HTML formatted: use <h2>, <p>, <strong>, <ul><li> tags\n- Sections: Match Summary, Key Moments, Standout Performers, What The Result Means\n- End with: <p>📺 <strong>Watch the ' + h + ' vs ' + a + ' highlights FREE on Sports 803</strong>: <a href="' + player + '">' + player + '</a></p>\n- No markdown, only HTML tags\n- Do not include DOCTYPE or body tags, only the article HTML';
+    return 'You are an original football match reporter for Sports 803.\nWrite a useful, match-specific report for: ' + h + ' vs ' + a + ' — ' + lg + '.\n' + (score ? 'Final score: ' + score + '.\n' : '') + 'Requirements:\n- Approximately 400 words\n- HTML only: use <h2>, <p>, <strong>, <ul><li> tags\n- Use verified facts supplied in the prompt; never invent possession, xG, shots, lineups, scorers, cards or substitutions\n- These are national teams or teams, never call them clubs unless the data explicitly identifies clubs\n- Explain the match through specific verified moments, not filler such as changes in tempo or generic pressing claims\n- Do not claim a lineup is confirmed unless the supplied data says it is confirmed\n- Include a concise author-neutral reporting note and identify missing data honestly\n- Use rights-safe language: never say free, no sign-up, guaranteed stream, or imply Sports 803 owns distribution rights\n- Use a How to Watch section that directs readers to authorized broadcasters; mention the Sports 803 player only if a permitted embed is supplied\n- No markdown, DOCTYPE, body tags, or invented sources';
   }
   if (!ev || ev.type === 'race') {
     const name = ev?.name || title;
     const league = ev?.league?.name || 'Motorsport';
     const ts = ev?.startTime ? ev.startTime.toLocaleString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }) : 'this weekend';
-    return 'You are a ' + tone + ' writing for Sports 803, a free sports streaming blog.\nWrite a detailed race/event preview article for: "' + name + '" (' + league + ').\nEvent date/time: ' + ts + '.\nRequirements:\n- Approximately ' + words + ' words\n- HTML formatted: use <h2>, <p>, <strong>, <ul><li> tags\n- Sections: Event Overview, What To Watch, Key Competitors, How To Watch\n- End with: <p>📺 <strong>Watch FREE on Sports 803</strong> — no sign-up required: <a href="' + player + '">' + player + '</a></p>\n- No markdown, only HTML tags\n- Do not include DOCTYPE or body tags, only the article HTML';
+    return 'You are a sports reporter for Sports 803.\nWrite a detailed, specific race/event preview for: "' + name + '" (' + league + ').\nEvent date/time: ' + ts + '.\nRequirements:\n- Approximately ' + words + ' words\n- HTML only, with factual context and no invented results or statistics\n- Sections: Event Overview, What To Watch, Key Competitors, How To Watch\n- Do not claim free access or distribution rights; direct readers to authorized broadcasters\n- No markdown, DOCTYPE or body tags';
   }
   const h = ev.home.name, a = ev.away.name, lg = ev.league.name;
   const ts = ev.startTime ? ev.startTime.toLocaleString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }) : 'today';
-  return 'You are a ' + tone + ' writing for Sports 803, a free sports streaming blog.\nWrite a detailed match preview article for: ' + h + ' vs ' + a + ' — ' + lg + '.\nKickoff: ' + ts + '.\nRequirements:\n- Approximately ' + words + ' words\n- HTML formatted: use <h2>, <p>, <strong>, <ul><li> tags\n- Sections: Match Overview, Current Form, Key Players To Watch, Head-to-Head History, Predicted Lineups & Tactics, Match Prediction\n- Include realistic tactical analysis and form assessment\n- End with: <p>📺 <strong>Watch ' + h + ' vs ' + a + ' FREE on Sports 803</strong> — no sign-up required: <a href="' + player + '">' + player + '</a></p>\n- No markdown, only HTML tags\n- Do not include DOCTYPE or body tags, only the article HTML';
+  return 'You are a sports reporter for Sports 803.\nWrite a detailed, match-specific preview for: ' + h + ' vs ' + a + ' — ' + lg + '.\nKickoff: ' + ts + '.\nRequirements:\n- Approximately ' + words + ' words\n- HTML only: use <h2>, <p>, <strong>, <ul><li> tags\n- Discuss only facts and clearly labelled expectations; do not invent form, statistics, injuries, lineups or predictions\n- Call them teams or national teams, not clubs unless explicitly appropriate\n- Label predicted lineups as predictions and confirmed lineups only after an official release\n- Add a concise reporting note and identify missing sources honestly\n- Direct readers to authorized broadcasters; never say free, no sign-up, or imply Sports 803 owns rights\n- No markdown, DOCTYPE or body tags';
 }
 
 async function callClaude(prompt) {
@@ -3252,7 +3252,7 @@ function parseESPN(ev, league) {
       venue: comp.venue?.fullName || '',
       location: comp.venue?.address?.city || '',
       entries: comps.slice(0, 5).map(c => ({ name: c.athlete?.displayName || c.team?.displayName || '—' })),
-      status, startTime, endTime: ev.endDate || comp.endDate || null
+      status, startTime, endTime: ev.endDate || comp.endDate || null, sourceUrl: ESPN + '/' + league.sport + '/' + league.slug + '/summary?event=' + encodeURIComponent(ev.id)
     };
   }
   const home = comps.find(c => c.homeAway === 'home') || comps[0] || {};
@@ -3271,7 +3271,7 @@ function parseESPN(ev, league) {
     id: ev.id, league, type: 'match',
     home: { name: home.team?.displayName || 'TBD', logo: getRawLogo(home), score: home.score ?? '' },
     away: { name: away.team?.displayName || 'TBD', logo: getRawLogo(away), score: away.score ?? '' },
-    status, startTime
+    status, startTime, sourceUrl: ESPN + '/' + league.sport + '/' + league.slug + '/summary?event=' + encodeURIComponent(ev.id)
   };
 }
 
@@ -3516,6 +3516,20 @@ function playerDataArticleSections(ev, mode) {
   if (news.length) sections.push([['Team News'], '<h2>Team News</h2><p>' + news.join('<br>') + '</p>']);
   return sections;
 }
+function matchDataSourceUrl(ev) {
+  if (ev?.sourceUrl) return ev.sourceUrl;
+  if (ev?.league?.sport && ev?.league?.slug && ev?.id) return 'https://site.api.espn.com/apis/site/v2/sports/' + encodeURIComponent(ev.league.sport) + '/' + encodeURIComponent(ev.league.slug) + '/summary?event=' + encodeURIComponent(ev.id);
+  return '';
+}
+function editorialArticleSections(ev) {
+  if (!ev || ev.type !== 'match') return [];
+  const esc = escapeLogoHtml, fixture = esc((ev.home?.name || ev.name || 'Home') + (ev.away?.name ? ' vs ' + ev.away.name : ''));
+  const now = new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+  const source = matchDataSourceUrl(ev);
+  const pd = ev.playerData || {}, home = pd.home || {}, away = pd.away || {};
+  const events = [...(home.scorers || []).map(x => '⚽ ' + esc(x.minute || 'Match event') + ' — ' + esc(x.player) + ' scored for ' + esc(home.name || ev.home?.name) + (x.assist ? ', assisted by ' + esc(x.assist) : '') + '.'), ...(away.scorers || []).map(x => '⚽ ' + esc(x.minute || 'Match event') + ' — ' + esc(x.player) + ' scored for ' + esc(away.name || ev.away?.name) + (x.assist ? ', assisted by ' + esc(x.assist) : '') + '.'), ...(home.cards || []).concat(away.cards || []).map(x => '🟨 ' + esc(x.minute || 'Match event') + ' — ' + esc(x.player) + ' booked.'), ...(home.substitutions || []).concat(away.substitutions || []).map(x => '↔ ' + esc(x.minute || 'Match event') + ' — ' + esc(x.player) + ' entered.')];
+  return [[['Author', 'Byline'], '<p><strong>By Sports 803 Match Desk</strong><br>Published: ' + now + '<br>Updated: ' + now + '</p>'], [['Verified Match Events', 'Key Moments'], '<h2>Verified Match Events</h2>' + (events.length ? '<ul><li>' + events.join('</li><li>') + '</li></ul>' : '<p>The available data feed did not confirm a detailed timeline at publication time. This section is updated when verified event data becomes available.</p>')], [['Reporting Notes', 'Sources'], '<h2>Reporting Notes &amp; Sources</h2><p>This report distinguishes verified match data from editorial analysis. Confirmed starting XIs are labelled only after a verified release. ' + (source ? '<a href="' + esc(source) + '" target="_blank" rel="nofollow noopener">Review the match-data source</a>.' : 'Check the competition organiser or authorized broadcaster for official details.') + '</p>']];
+}
 function buildAutoFilledArticleSections(ev, mode = 'preview') {
   if (!ev) return '';
   const h = ev.home?.name || ev.name || 'Home';
@@ -3525,13 +3539,13 @@ function buildAutoFilledArticleSections(ev, mode = 'preview') {
   const score = ev.home?.score !== '' && ev.home?.score != null ? ev.home.score + '–' + (ev.away?.score ?? '') : '';
   const isHighlight = mode === 'highlights';
   const sections = isHighlight ? [
-    [['Match Overview', 'Match Summary'], '<h2>Match Overview</h2><p>' + h + (a ? ' vs ' + a : '') + ' featured in ' + league + '. This highlights article brings together the match context, the decisive passages, and the replay so readers can follow the story of the event from the opening phase to the final whistle.</p>'],
+    [['Match Overview', 'Match Summary'], '<h2>Match Report</h2><p>' + h + (a ? ' vs ' + a : '') + ' finished in ' + league + '. This report combines the verified result and match timeline with clearly labelled editorial analysis; unavailable details are not presented as fact.</p>'],
     [['Match Details'], '<h2>Match Details</h2><p><strong>Event:</strong> ' + h + (a ? ' vs ' + a : '') + '<br><strong>Competition:</strong> ' + league + '<br><strong>Scheduled:</strong> ' + kickoff + (score ? '<br><strong>Score:</strong> ' + score : '') + '</p>'],
-    [['Key Moments', 'Highlights'], '<h2>Key Moments</h2><p>The key moments came from changes in tempo, chances created in dangerous areas, defensive recoveries, and the sequences that changed the momentum. Watch the highlights to see how each important passage developed in context.</p>'],
-    [['Standout Performers', 'Key Players'], '<h2>Standout Performers</h2><p>Players who carried the ball forward, created openings, defended dangerous situations, or delivered important set pieces shaped the contest. The replay provides the clearest way to review those individual contributions and the decisions behind them.</p>'],
-    [['Tactical Review', 'Match Analysis'], '<h2>Tactical Review</h2><p>The tactical picture was shaped by pressing intensity, spacing between the lines, transitions, and the way each side responded after losing possession. Reviewing the full sequence helps explain more than the final score alone.</p>'],
+    [['Key Moments', 'Highlights'], '<h2>Key Moments</h2><p>See the Verified Match Events section for the goals, cards and substitutions confirmed by the available match-data source. Tactical interpretation is limited to what those events support.</p>'],
+    [['Standout Performers', 'Key Players'], '<h2>Standout Performers</h2><p>Only players connected to a verified goal, assist, card, substitution or confirmed lineup are identified as standout performers. Additional player analysis will be added when reliable data is available.</p>'],
+    [['Tactical Review', 'Match Analysis'], '<h2>Tactical Review</h2><p>The match turned on the verified events recorded above. This review avoids invented possession, xG or tactical claims when those statistics are not available from a cited provider.</p>'],
     [['What the Result Means', 'What This Result Means'], '<h2>What the Result Means</h2><p>This result will influence confidence and preparation for the next round of fixtures. ' + h + ' and ' + (a || 'the opposition') + ' can use the performance to identify the spells that worked best and the moments that need improvement.</p>'],
-    [['How to Watch'], '<h2>How to Watch</h2><p>Use the embedded Sports 803 player and the replay link in this article to revisit the main action. The page is designed to provide useful event context alongside the video rather than offering only a thin player link.</p>'],
+    [['How to Watch'], '<h2>How to Watch</h2><p>Use an authorized broadcaster or licensed replay in your region. A Sports 803 player is shown only when a valid permitted source is available; otherwise this article remains useful as a match report and can be updated when a licensed replay is confirmed.</p>'],
     [['Frequently Asked Questions', 'FAQ'], '<h2>Frequently Asked Questions</h2><p><strong>Where can I watch ' + h + (a ? ' vs ' + a : '') + '?</strong><br>Return to this Sports 803 article for the latest stream, replay, kickoff, and event information.</p>']
   ] : [
     [['Match Overview'], '<h2>Match Overview</h2><p>' + h + (a ? ' take on ' + a : '') + ' in ' + league + '. This article covers the event context, the main storylines, and the viewing information readers need before the action begins.</p>'],
@@ -3540,10 +3554,10 @@ function buildAutoFilledArticleSections(ev, mode = 'preview') {
     [['Head-to-Head'], '<h2>Head-to-Head</h2><p>The history between these sides adds context to the occasion, but current form and match-day execution remain decisive. Previous meetings can reveal recurring tactical patterns, set-piece opportunities, and areas where either team may try to gain an advantage.</p>'],
     [['Key Players', 'Key Players to Watch'], '<h2>Key Players to Watch</h2><p>Watch for the players who can create separation, progress possession, win duels, and make the final pass. ' + h + ' will need its main contributors to make good decisions, while ' + (a || 'the opposition') + ' will look for individual moments to change the game.</p>'],
     [['Match Analysis', 'Tactical Analysis'], '<h2>Match Analysis</h2><p>Expect a tactical contest built around possession, pressing, defensive shape, and transitions. The team that manages space between the lines and reacts best after turnovers should create the clearest openings.</p>'],
-    [['How to Watch'], '<h2>How to Watch</h2><p>Follow this Sports 803 article for the latest event details and use the embedded player when the stream is available. No sign-up is required to check the viewing information and match updates.</p>'],
+    [['How to Watch'], '<h2>How to Watch</h2><p>Check an authorized broadcaster or licensed player in your region. If a permitted embed becomes available, this article can be updated without changing its match context.</p>'],
     [['Frequently Asked Questions', 'FAQ'], '<h2>Frequently Asked Questions</h2><p><strong>When is the event?</strong><br>The latest scheduled time is listed in the Match Details section. <strong>Where can I watch?</strong><br>Use the Sports 803 player and stream information attached to this article.</p>']
   ];
-  return playerDataArticleSections(ev, mode).concat(sections);
+  return playerDataArticleSections(ev, mode).concat(editorialArticleSections(ev), sections);
 }
 function ensureAutoFilledArticleSections(body, ev, mode = 'preview') {
   let html = String(body || '').trim();
@@ -3757,7 +3771,7 @@ async function drawMatchThumbnail(cv, opts) {
   ctx.fillStyle = '#fff';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('▶  WATCH FREE ON SPORTS 803', cx, H - Math.round(18 * sc));
+  ctx.fillText('▶  SPORTS 803 MATCH REPORT', cx, H - Math.round(18 * sc));
   drawS803Badge(ctx, W, H, sc);
 }
 
@@ -3853,7 +3867,7 @@ async function drawRaceThumbnail(cv, opts) {
   ctx.fillStyle = '#fff';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('▶  WATCH FREE ON SPORTS 803', cx, H - bH / 2);
+  ctx.fillText('▶  SPORTS 803 MATCH REPORT', cx, H - bH / 2);
   drawS803Badge(ctx, W, H, sc);
 }
 
@@ -5428,7 +5442,7 @@ async function genRacePost(id) {
           ctx.fillStyle = '#ffffff';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.fillText('SPORTS 803 · WATCH FREE', cv.width / 2, cv.height * 0.91);
+          ctx.fillText('SPORTS 803 · MATCH HIGHLIGHTS', cv.width / 2, cv.height * 0.91);
           resolve();
         };
         img.onerror = reject;
@@ -5541,7 +5555,7 @@ function raceTemplateKey(race) {
 }
 function buildRaceTemplateBody(race) {
   const template = RACE_ARTICLE_TEMPLATES[raceTemplateKey(race)] || RACE_ARTICLE_TEMPLATES.f1;
-  return '<h2>' + template.name + ' Full Race Replay</h2>\n<p>Watch the full replay of <strong>' + race.title + '</strong> on Sports 803. This replay covers the complete event and the key moments that shaped the result.</p>\n<h2>Race Overview</h2>\n<p>Follow the pace, decisive moves, and turning points from start to finish. The main themes for this event include ' + template.focus + '.</p>\n<h2>Key Moments</h2>\n<p>Review the starts, battles, tactical calls, and late-race pressure that defined the replay. Multiple player sources are provided below when available.</p>\n<h2>Championship Impact</h2>\n<p>The result adds important context to the season standings and the next round. Check back on Sports 803 for more ' + template.name + ' replay coverage.</p>\n<h2>How To Watch</h2>\n<p>Use the embedded Sports 803 player below to watch the full replay. If one source is unavailable, try another available source.</p>';
+  return '<h2>' + template.name + ' Race Report</h2>\n<p>This report covers <strong>' + race.title + '</strong> using the available event details and verified race information.</p>\n<h2>Race Overview</h2>\n<p>Follow the pace, decisive moves, and turning points from start to finish. The main themes for this event include ' + template.focus + '.</p>\n<h2>Key Moments</h2>\n<p>Verified race moments are added when the source provides them. Unsupported results or statistics are not presented as fact.</p>\n<h2>Championship Impact</h2>\n<p>The result adds context to the season standings and the next round. Check official competition information for the latest table impact.</p>\n<h2>How To Watch</h2>\n<p>Use an authorized broadcaster or licensed replay in your region. A permitted player can be added when a verified source is available.</p>';
 }
 async function buildRaceArticleBody(race) {
   if (CFG.deepseekKey) {
@@ -5549,13 +5563,13 @@ async function buildRaceArticleBody(race) {
       const words = { short: 300, medium: 600, long: 1000, xl: 1500 }[CFG.deepseekLength] || 600;
       const tone = CFG.deepseekTone || 'enthusiastic sports journalist';
       const player = (CFG.mediaPlayerBase || CFG.playerBase || 'https://www.sport803.online/p/player.html').replace(/\/$/, '');
-      const prompt = 'You are a ' + tone + ' writing for Sports 803.\nWrite a full race replay article for: "' + race.title + '".\n' + (race.dateStr ? 'Race date: ' + race.dateStr + '.\n' : '') + (race.sportSlug ? 'Sport: ' + race.sportSlug + '.\n' : '') + 'Requirements:\n- ~' + words + ' words\n- HTML format: use <h2>, <p>, <strong>, <ul><li>\n- Sections: Race Overview, Key Moments, Championship Impact, How To Watch\n- End with: <p>📺 Watch the full race replay FREE on Sports 803: <a href="' + player + '">' + player + '</a></p>\n- Only article HTML, no DOCTYPE or body tags';
+      const prompt = 'You are a sports reporter for Sports 803.\nWrite a full, specific race report for: "' + race.title + '".\n' + (race.dateStr ? 'Race date: ' + race.dateStr + '.\n' : '') + (race.sportSlug ? 'Sport: ' + race.sportSlug + '.\n' : '') + 'Requirements:\n- ~' + words + ' words\n- HTML format: use <h2>, <p>, <strong>, <ul><li>\n- Use only supplied or verified facts; do not invent results, statistics or sources\n- Sections: Race Overview, Key Moments, Championship Impact, How To Watch\n- Direct readers to authorized broadcasters and mention a player only when a permitted source is supplied\n- Only article HTML, no DOCTYPE or body tags';
       const article = await callClaude(prompt);
       if (article && article.length > 100) return article;
     } catch (e) { console.warn('[Claude race article]', e.message); }
   }
   const player = (CFG.mediaPlayerBase || CFG.playerBase || 'https://www.sport803.online/p/player.html').replace(/\/$/, '');
-  return buildRaceTemplateBody(race) + '\n<p>📺 Watch FREE on Sports 803: <a href="' + player + '">' + player + '</a></p>';
+  return buildRaceTemplateBody(race) + '\n<p>Check an authorized broadcaster or licensed replay in your region. A permitted Sports 803 player can be added when available.</p>';
 }
 
 // ============================================================
@@ -6182,15 +6196,15 @@ function buildArticleFallback(title, ev) {
   if (!ev) {
     const p = parseTitle(title);
     const h = p?.home || 'Home Team', a = p?.away || 'Away Team';
-    return pick(P_MO) + ' ' + h + ' and ' + a + '.\n\n' + pick(P_MC) + '\n\n📅 Date: TBD\n⚽ Match: ' + h + ' vs ' + a + '\n\n📺 Watch free on Sports 803 — no sign-up required.\n\n' + pick(P_CTA) + '\n\n#' + h.replace(/\s/g, '') + ' #' + a.replace(/\s/g, '') + ' #Sports803';
+    return pick(P_MO) + ' ' + h + ' and ' + a + '.\n\n' + pick(P_MC) + '\n\n📅 Date: TBD\n⚽ Match: ' + h + ' vs ' + a + '\n\nCheck an authorized broadcaster or licensed replay in your region.\n\n#' + h.replace(/\s/g, '') + ' #' + a.replace(/\s/g, '') + ' #Sports803';
   }
   if (ev.type === 'race') {
     const ts = ev.startTime ? ev.startTime.toLocaleString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }) : 'this weekend';
-    return pick(P_RO) + ' the ' + ev.name + '.\n\n' + pick(P_RC) + '\n\n🏎️ Event: ' + ev.name + '\n📍 Venue: ' + (ev.venue || 'TBC') + '\n🕐 Start: ' + ts + '\n\nStream FREE: ' + player + '\n\n' + pick(P_CTA);
+    return pick(P_RO) + ' the ' + ev.name + '.\n\n' + pick(P_RC) + '\n\n🏎️ Event: ' + ev.name + '\n📍 Venue: ' + (ev.venue || 'TBC') + '\n🕐 Start: ' + ts + '\n\nCheck an authorized broadcaster or licensed replay in your region.';
   }
   const h = ev.home.name, a = ev.away.name, lg = ev.league.name;
   const ts = ev.startTime ? ev.startTime.toLocaleString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }) : 'today';
-  return pick(P_MO) + ' ' + h + ' and ' + a + ' go head-to-head in ' + lg + '.\n\n' + pick(P_MC) + ' ' + pick(P_MC) + '\n\n📅 Date: ' + ts + '\n🏆 Competition: ' + lg + '\n⚽ Match: ' + h + ' vs ' + a + '\n\nStream FREE on Sports 803: ' + player + '\n\n' + pick(P_CTA) + '\n\n#' + h.replace(/\s/g, '') + ' #' + a.replace(/\s/g, '') + ' #' + lg.replace(/\s/g, '') + ' #Sports803';
+  return pick(P_MO) + ' ' + h + ' and ' + a + ' go head-to-head in ' + lg + '.\n\n' + pick(P_MC) + ' ' + pick(P_MC) + '\n\n📅 Date: ' + ts + '\n🏆 Competition: ' + lg + '\n⚽ Match: ' + h + ' vs ' + a + '\n\nCheck an authorized broadcaster or licensed replay in your region.\n\n#' + h.replace(/\s/g, '') + ' #' + a.replace(/\s/g, '') + ' #' + lg.replace(/\s/g, '') + ' #Sports803';
 }
 
 // ----- Fallback text pools -----
@@ -6202,14 +6216,14 @@ const P_MO = [
   'Get ready for a pulsating 90 minutes as'
 ];
 const P_MC = [
-  'Both clubs arrive at this fixture in contrasting form.',
+  'Both teams arrive at this fixture with different recent contexts.',
   'The head-to-head history between these two sides makes for compelling reading.',
   'Recent results suggest momentum could play a decisive role in this contest.',
   'Tactical battles across the pitch will likely determine who comes out on top.'
 ];
 const P_RO = ['The engines are revving and the motorsport world is focused on', 'Throttle-deep anticipation builds as the grid lights prepare to go out for'];
 const P_RC = ['The championship standings remain tight, making every point decisive.', 'Tyre degradation and fuel loads will be critical factors throughout the race.'];
-const P_CTA = ['Watch it all LIVE on Sports 803 — free, no sign-up required.', 'Stream the full action absolutely FREE on Sports 803 – no subscription needed.'];
+const P_CTA = ['Check an authorized broadcaster or licensed replay in your region.', 'Viewing availability may vary by location; use an authorized source.'];
 
 // ============================================================
 //  STREAM BUILDERS (add/remove)
