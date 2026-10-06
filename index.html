@@ -1363,6 +1363,7 @@ button:disabled { opacity: .4; cursor: not-allowed; transform: none !important; 
       <button class="nav-pill active" data-page="dashboard" role="tab" aria-selected="true" onclick="showPage('dashboard')">🏠 Dashboard</button>
       <button class="nav-pill" data-page="events" role="tab" aria-selected="false" onclick="showPage('events')">📅 Events</button>
       <button class="nav-pill" data-page="fullraces" role="tab" aria-selected="false" onclick="showPage('fullraces')">🏁 Full Races</button>
+      <button class="nav-pill" data-page="supersport" role="tab" aria-selected="false" onclick="showPage('supersport')">📺 SuperSport</button>
       <button class="nav-pill" data-page="compose" role="tab" aria-selected="false" onclick="showPage('compose')">✍️ Compose</button>
       <button class="nav-pill" data-page="thumbbuilder" role="tab" aria-selected="false" onclick="showPage('thumbbuilder')">🖼️ Thumbnails</button>
       <button class="nav-pill" data-page="channels" role="tab" aria-selected="false" onclick="showPage('channels')">📺 Channels</button>
@@ -1390,6 +1391,7 @@ button:disabled { opacity: .4; cursor: not-allowed; transform: none !important; 
     <button class="mobile-nav-pill active" data-mobile-page="dashboard" onclick="showPage('dashboard')">🏠 Dashboard</button>
     <button class="mobile-nav-pill" data-mobile-page="events" onclick="showPage('events')">📅 Events</button>
     <button class="mobile-nav-pill" data-mobile-page="fullraces" onclick="showPage('fullraces')">🏁 Full Race Replays</button>
+    <button class="mobile-nav-pill" data-mobile-page="supersport" onclick="showPage('supersport')">📺 SuperSport Highlights</button>
     <button class="mobile-nav-pill" data-mobile-page="compose" onclick="showPage('compose')">✍️ Compose Post</button>
     <button class="mobile-nav-pill" data-mobile-page="thumbbuilder" onclick="showPage('thumbbuilder')">🖼️ Thumbnails</button>
     <button class="mobile-nav-pill" data-mobile-page="channels" onclick="showPage('channels')">📺 Channels / Live TV</button>
@@ -1764,6 +1766,25 @@ button:disabled { opacity: .4; cursor: not-allowed; transform: none !important; 
   <div id="fr-scrape-log" style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:9px 12px;font-size:.68rem;font-family:var(--mono);color:var(--muted2);min-height:44px;max-height:120px;overflow-y:auto;white-space:pre-wrap;margin-bottom:12px">Ready. Click "Scrape FullRaces.com" or paste a race URL above…</div>
   <div id="races-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px">
     <div style="color:var(--muted2);grid-column:1/-1;padding:40px;text-align:center;opacity:.5">No races loaded yet.</div>
+  </div>
+</div>
+
+<!-- ========== SUPERSPORT HIGHLIGHTS ========== -->
+<div class="page" id="page-supersport">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+    <div style="font-family:var(--cond);font-size:1.4rem;font-weight:900;text-transform:uppercase">SuperSport <span style="color:var(--red)">Highlights</span></div>
+    <div style="display:flex;gap:7px;flex-wrap:wrap">
+      <button class="btn-red" onclick="loadSuperSportEvents()">🔄 Load Finished Events</button>
+      <button class="btn-orange" onclick="bulkPostSuperSportPage()">📤 Post All Found</button>
+    </div>
+  </div>
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-title">📺 SuperSport posting tool</div>
+    <p style="font-size:.76rem;color:var(--muted2);margin:0">Find a matching SuperSport video, wrap it in the Sports 803 player, generate the highlights article and logo thumbnail, then post or update Blogger.</p>
+    <div id="ss-page-status" style="font-size:.7rem;color:var(--muted2);margin-top:9px">Load finished events from the Events page first, or click the button above.</div>
+  </div>
+  <div id="supersport-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px">
+    <div style="color:var(--muted2);grid-column:1/-1;padding:40px;text-align:center;opacity:.5">No finished matches loaded.</div>
   </div>
 </div>
 
@@ -5159,6 +5180,42 @@ async function bulkSuperSportHighlights() {
   renderEventCards(allEvents); toast('SuperSport highlights complete. Found ' + found + '.', found ? 's' : 'w');
 }
 
+let superSportPageResults = {};
+function superSportPageEventKey(ev) { return evKey(ev); }
+function renderSuperSportEvents(events = allEvents.filter(ev => ev.type === 'match' && STATUS.isFinal(ev.status))) {
+  const grid = document.getElementById('supersport-grid'), status = document.getElementById('ss-page-status'); if (!grid) return;
+  const list = events.filter(ev => ev.type === 'match' && STATUS.isFinal(ev.status));
+  if (status) status.textContent = list.length ? list.length + ' finished match(es) ready for SuperSport lookup.' : 'No finished matches loaded. Open Events and click Fetch All first.';
+  if (!list.length) { grid.innerHTML = '<div style="color:var(--muted2);grid-column:1/-1;padding:40px;text-align:center;opacity:.5">No finished matches loaded.</div>'; return; }
+  grid.innerHTML = list.map(ev => {
+    const key = superSportPageEventKey(ev), found = superSportPageResults[key], pl = getLog(ev), title = escLiveTV(ev.home.name + ' vs ' + ev.away.name);
+    const source = found ? '<div style="font-size:.65rem;color:var(--green);margin:6px 0">✓ ' + escLiveTV(found.sourceKind === 'm3u8' ? 'SuperSport HLS found' : 'YouTube highlight found') + '</div>' : '<div style="font-size:.65rem;color:var(--muted2);margin:6px 0">Not searched yet</div>';
+    return '<div class="card" id="ss-card-' + encodeURIComponent(key) + '"><div class="card-title">📺 SuperSport</div><div style="font-family:var(--cond);font-weight:900;font-size:1rem">' + title + '</div><div style="font-size:.68rem;color:var(--muted2);margin-top:4px">' + escLiveTV(ev.league?.name || 'Match') + ' · ' + escLiveTV(ev.status || 'Final') + '</div>' + source + '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:8px"><button class="btn-ghost btn-xs" onclick="findSuperSportForPage(\'' + encodeURIComponent(key) + '\')">🔎 Find Video</button><button class="btn-orange btn-xs" onclick="postSuperSportPageEvent(\'' + encodeURIComponent(key) + '\')">📤 Post</button>' + (pl?.postUrl ? ' <a class="btn-ghost btn-xs" href="' + pl.postUrl + '" target="_blank" rel="noopener">View Post ↗</a>' : '') + '</div></div>';
+  }).join('');
+}
+function loadSuperSportEvents() { renderSuperSportEvents(); showPage('supersport'); }
+function getSuperSportPageEvent(encoded) { const key = decodeURIComponent(encoded || ''); return allEvents.find(ev => evKey(ev) === key) || null; }
+async function findSuperSportForPage(encoded) {
+  const ev = getSuperSportPageEvent(encoded); if (!ev) return null; toast('Searching SuperSport for ' + ev.home.name + ' vs ' + ev.away.name + '…', 'i');
+  const result = await findSuperSportHighlight(ev); if (result) { superSportPageResults[evKey(ev)] = result; setLog(ev, { hlSource: 'supersport', sourceKind: result.sourceKind, hlUrl: result.playerUrl, replayUrl: result.pageUrl, hlRawSource: result.rawSource }); toast('SuperSport video found ✓', 's'); } else toast('No matching SuperSport video found.', 'w');
+  renderSuperSportEvents(); return result;
+}
+async function postSuperSportPageEvent(encoded) {
+  if (!accessToken || !CFG.blogId) { toast('Sign in with Google and set your Blog ID first.', 'e'); return; }
+  const ev = getSuperSportPageEvent(encoded); if (!ev) return; let result = superSportPageResults[evKey(ev)]; if (!result) result = await findSuperSportForPage(encoded); if (!result) return;
+  const label = ev.home.name + ' vs ' + ev.away.name, title = label + ' – SuperSport Highlights & Replay | Sports 803'; toast('Generating SuperSport article…', 'i');
+  try {
+    const article = ensureAutoFilledArticleSections(await buildArticleWithClaude(title, ev, true), ev, 'highlights');
+    const cv = document.createElement('canvas'); setCanvasSize(cv, '1920', '16:9');
+    await drawMatchThumbnail(cv, { home: ev.home.name, away: ev.away.name, hLogo: ev.home.logo || '', aLogo: ev.away.logo || '', league: 'SUPERSPORT HIGHLIGHTS', datetime: ev.startTime ? ev.startTime.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) : '', bg1: '#0d1b2a', bg2: '#1a0020', mode: 'highlights', score: ev.home.score !== '' ? ev.home.score + ' - ' + ev.away.score : '' });
+    let thumb = CFG.imgbbKey ? await uploadCanvas(cv) : ''; if (!thumb) thumb = cv.toDataURL('image/jpeg', .85);
+    const html = '<div><img src="' + thumb + '" style="max-width:100%;height:auto;border-radius:10px;margin-bottom:18px" alt="' + escLiveTV(title) + '"></div>\n' + article + '\n\n' + buildHighlightsPlayerIframe(result.playerUrl);
+    const pl = getLog(ev), post = pl?.postId ? await updateExistingPost(ev, title, html, pl.status || 'LIVE', getLabels(ev), pl.scheduledFor || null) : await postRaw(title, html, 'LIVE', getLabels(ev), null);
+    if (post) { setLog(ev, { postId: post.id, postUrl: post.url, title, hasHL: true, hlSource: 'supersport', sourceKind: result.sourceKind, hlUrl: result.playerUrl, replayUrl: result.pageUrl, thumb }); toast('SuperSport post published ✓', 's'); renderSuperSportEvents(); renderEventCards(allEvents); return post; }
+  } catch (e) { console.error('[postSuperSportPageEvent]', e); toast('SuperSport post failed: ' + e.message, 'e'); }
+}
+async function bulkPostSuperSportPage() { const list = allEvents.filter(ev => ev.type === 'match' && STATUS.isFinal(ev.status)); if (!list.length) { toast('Load finished events first.', 'w'); return; } let posted = 0; for (const ev of list) { const p = await postSuperSportPageEvent(encodeURIComponent(evKey(ev))); if (p) posted++; await new Promise(r => setTimeout(r, 900)); } toast('SuperSport posting complete: ' + posted + ' processed.', posted ? 's' : 'w'); }
+
 // ============================================================
 //  FULL RACES SCRAPER
 // ============================================================
@@ -5951,6 +6008,7 @@ function showPage(id) {
     b.setAttribute('aria-current', active ? 'page' : 'false');
   });
   if (id === 'fullraces' && fullRacesData.length) renderFullRaces(fullRacesData);
+  if (id === 'supersport') renderSuperSportEvents();
   if (id === 'templates') renderTemplateList();
   closeMobileMenu();
 }
