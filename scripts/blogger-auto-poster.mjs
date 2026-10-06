@@ -795,8 +795,18 @@ function logEvent(entry) { console.log(JSON.stringify(entry)); }
  * "player URL changed/missing" case needs the body, which we fetch lazily (one GET) and only for
  * posts of today's events that have a player URL to compare against.
  */
-async function needsUpdate(existing, { final, desiredPlayer }, ctx) {
+function contentHasPlayerData(content) {
+  const body = String(content || '').toLowerCase();
+  return /confirmed starting xis|probable xis|goal scorers|scorers|disciplinary|substitutions|danger men|team news/.test(body);
+}
+async function needsUpdate(existing, { event, final, desiredPlayer }, ctx) {
   if (final && !(existing.labels || []).includes('Highlights')) return true;
+  // A post is valid without a highlight/stream iframe. Revisit it when verified
+  // player data becomes available so lineups and match details can be enriched later.
+  if (event?.playerData && !contentHasPlayerData(existing.content)) {
+    if (typeof existing.content !== 'string') existing.content = await getPostBody(ctx.token, ctx.blogId, existing.id);
+    if (!contentHasPlayerData(existing.content)) return true;
+  }
   if (!desiredPlayer) return false;
   if (typeof existing.content !== 'string') existing.content = await getPostBody(ctx.token, ctx.blogId, existing.id);
   if (/\/player\.html\/+\?/i.test(existing.content)) return true;
@@ -819,7 +829,7 @@ async function processEvents(events, ctx) {
       const label = isRace(event) ? eventName(event) : displayEventName(event);
       title = isRace(event) ? (final ? `${label} – Full Race Replay | Sports 803` : `${label} – Race Preview & Live Stream | Sports 803`) : (final ? `${label} – Highlights & Replay | Sports 803` : `${label} – ${leagueName(event)} Live Stream | Sports 803`);
       const desiredPlayer = superSport?.playerUrl || playerUrlFor(event, streams);
-      const shouldUpdate = existing ? await needsUpdate(existing, { final, desiredPlayer }, ctx) : false;
+      const shouldUpdate = existing ? await needsUpdate(existing, { event, final, desiredPlayer }, ctx) : false;
       if (existing && !shouldUpdate) {
         counts.skipped++;
         console.log(`skipped ${existing.id}: ${title}`);

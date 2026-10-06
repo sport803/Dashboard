@@ -36,6 +36,10 @@ For soccer, basketball, and hockey matches, the Action and dashboard can enrich 
 
 Completed match highlights try the existing OneBall source first. If OneBall has no usable replay, the dashboard and Action can query SuperSport's sport video listing and parse its Next.js payload for a verified YouTube embed or HLS source. Raw upstream URLs are never embedded directly: YouTube is wrapped with the Sports 803 player using `?embed=`, and HLS uses `?mora=`. Results are cached for six hours and the Action can disable this source with `SUPERSPORT_HIGHLIGHTS=0`.
 
+### Deferred media and article enrichment
+
+Missing OneBall, SuperSport, PPV, or other iframe sources never block an event or highlights article from being posted. The article is marked as pending in the dashboard log when no player is available. Later scheduled runs retry source discovery and update the existing Blogger post when a player URL appears. They also update existing articles when verified ESPN/TheSportsDB lineups, scorers, cards, substitutions, danger men, or team-news data becomes available.
+
 ### Required GitHub repository secrets
 
 Add these under **Settings → Secrets and variables → Actions → New repository secret**:

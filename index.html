@@ -4339,16 +4339,14 @@ async function bulkPostHighlights() {
       const cachedLookup=pl?.oneMatchId ? await getOneBallLookup(pl.oneMatchId) : null;
       const found=cachedLookup?.replayUrl ? {matchId:pl.oneMatchId,replayUrl:cachedLookup.replayUrl,playerUrl:oneBallPlayerUrl(pl.oneMatchId,'replay')} : await searchOneBallHighlights(ev);
       const oneMatchId=found?.matchId||pl?.oneMatchId||extractReplayId(found?.replayUrl||pl?.replayUrl||'');
-      if (!oneMatchId) { failed++; continue; }
-      const replayUrl=oneBallUrlFor(oneMatchId,'replay');
-      const playerUrl=oneBallPlayerUrl(oneMatchId,'replay');
-      if (!found?.playerUrl && !playerUrl) { failed++; continue; }
+      const replayUrl=found?.replayUrl || (oneMatchId ? oneBallUrlFor(oneMatchId,'replay') : '');
+      const playerUrl=found?.playerUrl || (oneMatchId ? oneBallPlayerUrl(oneMatchId,'replay') : '');
       const title=ev.home.name+' vs '+ev.away.name+' – Highlights & Replay | Sports 803';
       const body=ensureAutoFilledArticleSections(await buildArticleWithClaude(title,ev,true),ev,'highlights');
-      const html=body+'\n\n'+buildHighlightsPlayerIframe(playerUrl);
+      const html=body+(playerUrl ? '\n\n'+buildHighlightsPlayerIframe(playerUrl) : '');
       const post=pl?.postId ? await updateExistingPost(ev,title,html,CFG.schedStatus||'DRAFT',getLabels(ev)) : await postRaw(title,html,CFG.schedStatus||'DRAFT',getLabels(ev));
       if (!post) { failed++; if(failed>=3){toast('Bulk highlights stopped after 3 failures','e');break;} continue; }
-      setLog(ev,{postId:post.id,postUrl:post.url,title,hasHL:true,hlUrl:playerUrl,replayUrl,status:CFG.schedStatus||'DRAFT',oneMatchId});
+      setLog(ev,{postId:post.id,postUrl:post.url,title,hasHL:!!playerUrl,highlightPending:!playerUrl,hlUrl:playerUrl,replayUrl,status:CFG.schedStatus||'DRAFT',oneMatchId});
       posted++; toast('Bulk highlights: '+posted+'/'+candidates.length,'i'); await new Promise(r=>setTimeout(r,1500));
     } catch(e) { failed++; console.warn('[bulk highlights]',e); if(failed>=3) break; }
   }
@@ -5142,13 +5140,14 @@ async function quickPostHighlights(sid) {
   const button = document.querySelector('.event-card[data-id="' + String(ev.id).replace(/"/g, '\\"') + '"] .btn-orange');
   if (button) { button.disabled = true; button.dataset.originalText = button.textContent; button.textContent = '⏳ HL…'; }
   try {
+    // Missing replay is not a blocker: publish the article now and let later
+    // searches add the iframe when OneBall or SuperSport becomes available.
     const found = await searchOneBallHighlights(ev);
-    if (!found) return;
     const title = ev.home.name + ' vs ' + ev.away.name + ' – Highlights & Replay | Sports 803';
     toast('Writing full highlights article…', 'i');
     const generated = await buildArticleWithClaude(title, ev, true);
     const body = ensureAutoFilledArticleSections(generated, ev, 'highlights');
-    const html = body + '\n\n' + buildHighlightsPlayerIframe(found.playerUrl || found.replayUrl);
+    const html = body + (found ? '\n\n' + buildHighlightsPlayerIframe(found.playerUrl || found.replayUrl) : '');
     const pl = getLog(ev);
     let post;
     if (pl?.postId) {
@@ -5159,9 +5158,9 @@ async function quickPostHighlights(sid) {
       post = await postRaw(title, html, 'LIVE', getLabels(ev), null);
     }
     if (post) {
-      setLog(ev, { postId: post.id, postUrl: post.url, title, hasHL: true, status: 'LIVE', hlUrl: found.playerUrl || '', replayUrl: found.replayUrl || '', oneMatchId: found.matchId || null });
+      setLog(ev, { postId: post.id, postUrl: post.url, title, hasHL: !!found, highlightPending: !found, status: 'LIVE', hlUrl: found?.playerUrl || '', replayUrl: found?.replayUrl || '', oneMatchId: found?.matchId || null });
       renderEventCards(allEvents);
-      toast('Highlights found and posted automatically ✓', 's');
+      toast(found ? 'Highlights found and posted automatically ✓' : 'Article posted; replay will be added when available ✓', 's');
     }
   } catch (e) {
     console.error('[quickPostHighlights]', e);
@@ -5202,16 +5201,16 @@ async function findSuperSportForPage(encoded) {
 }
 async function postSuperSportPageEvent(encoded) {
   if (!accessToken || !CFG.blogId) { toast('Sign in with Google and set your Blog ID first.', 'e'); return; }
-  const ev = getSuperSportPageEvent(encoded); if (!ev) return; let result = superSportPageResults[evKey(ev)]; if (!result) result = await findSuperSportForPage(encoded); if (!result) return;
+  const ev = getSuperSportPageEvent(encoded); if (!ev) return; let result = superSportPageResults[evKey(ev)]; if (!result) result = await findSuperSportForPage(encoded);
   const label = ev.home.name + ' vs ' + ev.away.name, title = label + ' – SuperSport Highlights & Replay | Sports 803'; toast('Generating SuperSport article…', 'i');
   try {
     const article = ensureAutoFilledArticleSections(await buildArticleWithClaude(title, ev, true), ev, 'highlights');
     const cv = document.createElement('canvas'); setCanvasSize(cv, '1920', '16:9');
     await drawMatchThumbnail(cv, { home: ev.home.name, away: ev.away.name, hLogo: ev.home.logo || '', aLogo: ev.away.logo || '', league: 'SUPERSPORT HIGHLIGHTS', datetime: ev.startTime ? ev.startTime.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) : '', bg1: '#0d1b2a', bg2: '#1a0020', mode: 'highlights', score: ev.home.score !== '' ? ev.home.score + ' - ' + ev.away.score : '' });
     let thumb = CFG.imgbbKey ? await uploadCanvas(cv) : ''; if (!thumb) thumb = cv.toDataURL('image/jpeg', .85);
-    const html = '<div><img src="' + thumb + '" style="max-width:100%;height:auto;border-radius:10px;margin-bottom:18px" alt="' + escLiveTV(title) + '"></div>\n' + article + '\n\n' + buildHighlightsPlayerIframe(result.playerUrl);
+    const html = '<div><img src="' + thumb + '" style="max-width:100%;height:auto;border-radius:10px;margin-bottom:18px" alt="' + escLiveTV(title) + '"></div>\n' + article + (result ? '\n\n' + buildHighlightsPlayerIframe(result.playerUrl) : '');
     const pl = getLog(ev), post = pl?.postId ? await updateExistingPost(ev, title, html, pl.status || 'LIVE', getLabels(ev), pl.scheduledFor || null) : await postRaw(title, html, 'LIVE', getLabels(ev), null);
-    if (post) { setLog(ev, { postId: post.id, postUrl: post.url, title, hasHL: true, hlSource: 'supersport', sourceKind: result.sourceKind, hlUrl: result.playerUrl, replayUrl: result.pageUrl, thumb }); toast('SuperSport post published ✓', 's'); renderSuperSportEvents(); renderEventCards(allEvents); return post; }
+    if (post) { setLog(ev, { postId: post.id, postUrl: post.url, title, hasHL: !!result, highlightPending: !result, hlSource: result ? 'supersport' : 'supersport-pending', sourceKind: result?.sourceKind || '', hlUrl: result?.playerUrl || '', replayUrl: result?.pageUrl || '', thumb }); toast(result ? 'SuperSport post published ✓' : 'Article posted; SuperSport video will be added later ✓', 's'); renderSuperSportEvents(); renderEventCards(allEvents); return post; }
   } catch (e) { console.error('[postSuperSportPageEvent]', e); toast('SuperSport post failed: ' + e.message, 'e'); }
 }
 async function bulkPostSuperSportPage() { const list = allEvents.filter(ev => ev.type === 'match' && STATUS.isFinal(ev.status)); if (!list.length) { toast('Load finished events first.', 'w'); return; } let posted = 0; for (const ev of list) { const p = await postSuperSportPageEvent(encodeURIComponent(evKey(ev))); if (p) posted++; await new Promise(r => setTimeout(r, 900)); } toast('SuperSport posting complete: ' + posted + ' processed.', posted ? 's' : 'w'); }
