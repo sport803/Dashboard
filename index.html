@@ -1502,6 +1502,7 @@ button:disabled { opacity: .4; cursor: not-allowed; transform: none !important; 
       <button class="btn-gold" onclick="bulkGenThumbs()">🖼️ Bulk Gen Thumbs</button>
       <button class="btn-green" onclick="bulkPostAll()">📤 Bulk Post</button>
       <button class="btn-orange" onclick="bulkPostHighlights()">🎬 Bulk Highlights</button>
+      <button class="btn-orange" onclick="bulkSuperSportHighlights()">🎬 SS HL</button>
       <button class="btn-orange" onclick="fetchAllOneBallHighlights()">🎬 Fetch All HL</button>
     </div>
   </div>
@@ -4977,8 +4978,10 @@ function canonicalOneBallReplayUrl(url) {
   return raw.replace(/\/\/+/, '/').replace('https:/', 'https://');
 }
 function playerBaseUrl() { return normalizePlayerBaseUrl(CFG.playerBase); }
+function isSuperSportSourceUrl(url) { const raw = String(url || ''); let decoded = raw; try { decoded = decodeURIComponent(raw); } catch (e) {} return /vod\.supersport\.com|youtube\.com\/embed/i.test(decoded); }
 function buildHighlightsPlayerIframe(url) {
   if (!url) return '';
+  if (isSuperSportSourceUrl(url) && (String(url).includes('?mora=') || String(url).includes('?embed=') || String(url).includes('&mora=') || String(url).includes('&embed='))) return '<div style="margin:18px 0;position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:10px"><iframe loading="lazy" src="' + String(url).replace(/&/g, '&amp;') + '" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;border-radius:10px" allowfullscreen allow="autoplay; encrypted-media"></iframe></div>';
   const replay = canonicalOneBallReplayUrl(url);
   const playerBase = playerBaseUrl();
   let src = replay;
@@ -5039,6 +5042,48 @@ function extractOneBallStream(html, baseUrl) {
   const plain=String(html).match(/https?:\/\/[^"'\s<>]+(?:m3u8|mp4)[^"'\s<>]*/gi)||[]; plain.forEach(add);
   return [...new Set(candidates)][0] || '';
 }
+// v13: SuperSport highlights source. Fetches supersport.com/{sport}/videos,
+// parses the Next.js __next_f payload, extracts the YouTube embed or HLS URL,
+// and always wraps it in the Sports 803 player with ?embed= or ?mora=.
+const SUPERSPORT_BASE = 'https://supersport.com';
+const SUPERSPORT_SPORT_MAP = { soccer: 'football', football: 'football', mma: 'mma', basketball: 'basketball', rugby: 'rugby', cricket: 'cricket', golf: 'golf', tennis: 'tennis', motorsport: 'motorsport', racing: 'motorsport', cycling: 'cycling' };
+const superSportCache = new Map();
+function supersportSportFor(ev) { return SUPERSPORT_SPORT_MAP[String(ev?.league?.sport || ev?.sport || '').toLowerCase()] || null; }
+// v13: Use the existing proxy order and reject short shell responses.
+async function fetchSuperSportPage(url, timeoutMs = 15000) {
+  const proxies = [u => 'https://r.jina.ai/http://' + u.replace(/^https?:\/\//i, ''), u => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u), u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u), u => 'https://corsproxy.io/?url=' + encodeURIComponent(u)];
+  for (const proxy of proxies) { try { const c = new AbortController(), t = setTimeout(() => c.abort(), timeoutMs), r = await fetch(proxy(url), { headers: { 'X-Return-Format': 'html' }, signal: c.signal }); clearTimeout(t); if (r.ok) { const html = await r.text(); if (html.length > 500) return html; } } catch (e) { console.warn('[SuperSport] proxy failed', e.message); } }
+  return '';
+}
+// v13: Decode Next.js flight chunks and return only secure, verified media URLs.
+function extractSuperSportVideo(html, pageUrl) {
+  const chunks = []; let m; const re = /self\.__next_f\.push\(\[1,\s*("(?:\\.|[^"\\])*")\s*\]\)/g;
+  while ((m = re.exec(String(html || '')))) { try { chunks.push(JSON.parse(m[1])); } catch (e) {} }
+  const blob = chunks.join('\n') + '\n' + String(html || '');
+  const yt = blob.match(/https:\/\/www\.youtube\.com\/embed\/([A-Za-z0-9_-]+)/i);
+  const hls = blob.match(/https:\/\/vod\.supersport\.com\/[^\s"'\\]+?\.m3u8(?:\?[^\s"'\\]+)?/i);
+  const sourceUrl = hls ? hls[0].replace(/\\\//g, '/') : yt ? 'https://www.youtube.com/embed/' + yt[1] : '';
+  if (!sourceUrl || !/^https:\/\//i.test(sourceUrl)) return null;
+  const title = ((blob.match(/"title"\s*:\s*"((?:\\.|[^"\\])+)"/i) || [])[1] || (String(html).match(/<title[^>]*>([^<]+)/i) || [])[1] || '').replace(/\\"/g, '"').trim();
+  const image = (String(html).match(/<meta[^>]+(?:property|name)=["']og:image["'][^>]+content=["']([^"']+)/i) || blob.match(/"image"\s*:\s*"(https:\/\/images\.supersport\.com[^"\\]+)/i) || [])[1] || '';
+  return { title: title || 'SuperSport Highlights', source: hls ? 'm3u8' : 'youtube', sourceUrl, thumbnail: image.replace(/\\\//g, '/'), pageUrl };
+}
+// v13: Match the most recent SuperSport listing item without crawling past one video page.
+async function findSuperSportHighlight(ev) {
+  const sport = supersportSportFor(ev); if (!sport || !ev || ev.type === 'race') return null;
+  const key = evKey(ev), cached = superSportCache.get(key); if (cached && Date.now() - cached.ts < 6 * 3600000) return cached.value;
+  try {
+    const listingUrl = SUPERSPORT_BASE + '/' + sport + '/videos', listing = await fetchSuperSportPage(listingUrl); if (!listing) return null;
+    const links = new Set(), linkRe = new RegExp('(?:"url"\\s*:\\s*|href=["\\\'])(/+' + sport + '/video/[^"\\\']+)', 'gi'); let match;
+    while ((match = linkRe.exec(listing)) && links.size < 25) links.add(match[1].replace(/^\/+/, '/').replace(/\\u0026/g, '&'));
+    const candidates = [...links].filter(path => oneBallMatchFound(path, ev.home?.name || '', ev.away?.name || '')).sort((a, b) => Number(/highlight/i.test(b)) - Number(/highlight/i.test(a)));
+    if (!candidates.length) { superSportCache.set(key, { ts: Date.now(), value: null }); return null; }
+    const pageUrl = SUPERSPORT_BASE + candidates[0], video = extractSuperSportVideo(await fetchSuperSportPage(pageUrl), pageUrl); if (!video) return null;
+    const playerUrl = playerBaseUrl() + '?' + (video.source === 'm3u8' ? 'mora=' : 'embed=') + encodeURIComponent(video.sourceUrl);
+    const result = { url: playerUrl, playerUrl, source: 'supersport', sourceKind: video.source, rawSource: video.sourceUrl, pageUrl: video.pageUrl, matchId: null, title: ev.home.name + ' vs ' + ev.away.name + ' Highlights', thumbnail: video.thumbnail || '' };
+    superSportCache.set(key, { ts: Date.now(), value: result }); return result;
+  } catch (e) { console.warn('[SuperSport] ' + e.message); return null; }
+}
 async function fetchOneBallPage(url, timeoutMs=15000) {
   const proxies=[u=>'https://r.jina.ai/'+u,u=>'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(u),u=>'https://api.allorigins.win/raw?url='+encodeURIComponent(u),u=>'https://corsproxy.io/?url='+encodeURIComponent(u)];
   for(const proxy of proxies){try{const c=new AbortController(),t=setTimeout(()=>c.abort(),timeoutMs),r=await fetch(proxy(url),{headers:{'X-Return-Format':'html'},signal:c.signal});clearTimeout(t);if(r.ok){const h=await r.text();if(h.length>100)return h;}}catch(e){console.warn('[OneBallSearch] proxy failed',e.message)}}
@@ -5056,11 +5101,11 @@ async function searchOneBallHighlights(ev) {
     setLog(ev, { hasHL: true, hlUrl: playerUrl, replayUrl: canonical, oneMatchId: String(overrideId), hlCanonical: canonical, hlFetchedAt: Date.now() });
     return result;
   }
-  const listHtml=await fetchOneBallPage('https://oneball.live/replay/'); if(!listHtml){toast('Could not fetch OneBall Replay list','e');return null;}
+  const listHtml=await fetchOneBallPage('https://oneball.live/replay/'); if(!listHtml){ const ss = await findSuperSportHighlight(ev); if (ss) setLog(ev, { hasHL: true, hlUrl: ss.playerUrl, replayUrl: ss.pageUrl, hlSource: 'supersport', sourceKind: ss.sourceKind, hlRawSource: ss.rawSource, hlFetchedAt: Date.now() }); return ss; }
   const doc=new DOMParser().parseFromString(listHtml,'text/html'); let matchUrl='';
   const links=[...doc.querySelectorAll('a[href]')]; for(const a of links){if(oneBallMatchFound(a.textContent+' '+a.getAttribute('href'),home,away)){try{matchUrl=new URL(a.getAttribute('href'), 'https://oneball.live').href}catch(e){} if(matchUrl)break;}}
   if(!matchUrl){const md=listHtml.match(/\[([^\]]+)\]\((https?:\/\/[^\s)]+\/replay\/[^\s)]+)\)/gi)||[];for(const x of md){const q=x.match(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/i);if(q&&oneBallMatchFound(q[1],home,away)){matchUrl=q[2];break}}}
-  if(!matchUrl){toast('No matching replay found on OneBall for '+home+' vs '+away,'w');return null;}
+  if(!matchUrl){ const ss = await findSuperSportHighlight(ev); if (ss) setLog(ev, { hasHL: true, hlUrl: ss.playerUrl, replayUrl: ss.pageUrl, hlSource: 'supersport', sourceKind: ss.sourceKind, hlRawSource: ss.rawSource, hlFetchedAt: Date.now() }); return ss; }
   const canonical=canonicalOneBallReplayUrl(matchUrl.split('?')[0]); const matchId=extractReplayId(canonical); const playerUrl=oneBallPlayerUrl(matchId, 'replay');
   const result={url:playerUrl,playerUrl,replayUrl:canonical,replayPageUrl:canonical,matchId,title:home+' vs '+away+' Highlights'};
   persistOneBallLookup(matchId, { replayUrl: canonical, home, away });
@@ -5107,6 +5152,12 @@ async function quickPostHighlights(sid) {
 
 async function oneBallSearchForModal(){const ev=allEvents[parseInt(v('hl-select'))];if(!ev){toast('Select an event first','w');return}const r=await searchOneBallHighlights(ev);if(r){set('hl-video',r.playerUrl);onHLSelect();toast('✓ OneBall Replay found: '+r.title,'s')}}
 async function fetchAllOneBallHighlights(){const fin=allEvents.filter(ev=>STATUS.isFinal(ev.status));if(!fin.length){toast('No finished events found to fetch highlights for.','w');return}toast('Starting OneBall search for '+fin.length+' events…','i');let found=0;for(const ev of fin){if(await searchOneBallHighlights(ev))found++;await new Promise(r=>setTimeout(r,500))}renderEventCards(allEvents);toast('OneBall search complete. Found '+found+' replay(s).','s')}
+// v13: SuperSport-only bulk highlights fallback; one listing and video fetch per event.
+async function bulkSuperSportHighlights() {
+  const candidates = allEvents.filter(ev => ev.type === 'match' && STATUS.isFinal(ev.status) && !getLog(ev)?.hasHL); if (!candidates.length) { toast('No finished events need SuperSport highlights.', 'w'); return; }
+  let found = 0, failures = 0; for (const ev of candidates) { const result = await findSuperSportHighlight(ev); if (!result) { failures++; if (failures >= 3) break; } else { const title = ev.home.name + ' vs ' + ev.away.name + ' – Highlights & Replay | Sports 803', body = ensureAutoFilledArticleSections(await buildArticleWithClaude(title, ev, true), ev, 'highlights'), html = body + '\n\n' + buildHighlightsPlayerIframe(result.playerUrl); const pl = getLog(ev); const post = pl?.postId ? await updateExistingPost(ev, title, html, pl.status || 'LIVE', getLabels(ev), pl.scheduledFor || null) : await postRaw(title, html, 'LIVE', getLabels(ev), null); if (post) { found++; setLog(ev, { postId: post.id, postUrl: post.url, title, hasHL: true, hlUrl: result.playerUrl, replayUrl: result.pageUrl, hlSource: 'supersport', hlRawSource: result.rawSource, status: 'LIVE' }); } } toast('SuperSport HL: ' + found + '/' + candidates.length + ' processed', 'i'); await new Promise(r => setTimeout(r, 1500)); }
+  renderEventCards(allEvents); toast('SuperSport highlights complete. Found ' + found + '.', found ? 's' : 'w');
+}
 
 // ============================================================
 //  FULL RACES SCRAPER
@@ -5496,6 +5547,7 @@ function onHLSelect() {
   const ev = allEvents[idx];
   if (!ev) return;
   const pl = getLog(ev);
+  const resolution = document.getElementById('hl-resolution'); if (resolution && pl?.hlSource === 'supersport') { resolution.style.display = 'flex'; resolution.innerHTML = 'Source: SuperSport · ' + (pl.sourceKind || 'video') + (pl.replayUrl ? ' <a href="' + pl.replayUrl + '" target="_blank" rel="noopener" style="color:var(--blue)">Open source ↗</a>' : ''); }
   if (pl?.postId) {
     ex.style.display = 'flex';
     document.getElementById('hl-link').href = pl.postUrl || '#';
@@ -5802,7 +5854,7 @@ function renderPostLog() {
   const entries = Object.values(postLog);
   if (!entries.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--muted2);padding:20px">No posts yet.</td></tr>'; return; }
   tbody.innerHTML = entries.slice().reverse().map(p =>
-    '<tr><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + (p.title || '') + '">' + (p.title || '—') + '</td><td style="color:var(--muted2);font-size:.7rem">' + (p.league || '—') + '</td><td>' + (p.thumb ? '<span class="thumb-badge">🖼️ Yes</span>' : '<span style="color:var(--muted2);font-size:.7rem">—</span>') + '</td><td><span class="post-badge ' + (p.status || 'draft').toLowerCase() + '">' + (p.status || 'draft') + '</span></td><td>' + (p.hasHL ? '<span style="color:var(--green);font-size:.7rem">✓</span>' : '<span style="color:var(--muted2);font-size:.7rem">—</span>') + '</td><td style="color:var(--muted2);font-size:.68rem">' + (p.ts ? new Date(p.ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—') + '</td><td>' + (p.postUrl ? '<a href="' + p.postUrl + '" target="_blank" style="font-size:.7rem;color:var(--blue)">View</a>' : '—') + '</td></tr>'
+    '<tr><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + (p.title || '') + '">' + (p.title || '—') + '</td><td style="color:var(--muted2);font-size:.7rem">' + (p.league || '—') + '</td><td>' + (p.thumb ? '<span class="thumb-badge">🖼️ Yes</span>' : '<span style="color:var(--muted2);font-size:.7rem">—</span>') + '</td><td><span class="post-badge ' + (p.status || 'draft').toLowerCase() + '">' + (p.status || 'draft') + '</span></td><td>' + (p.hasHL ? '<span style="color:var(--green);font-size:.7rem">✓</span>' + (p.hlSource === 'supersport' ? ' <span class="thumb-badge">SS</span>' : '') : '<span style="color:var(--muted2);font-size:.7rem">—</span>') + '</td><td style="color:var(--muted2);font-size:.68rem">' + (p.ts ? new Date(p.ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—') + '</td><td>' + (p.postUrl ? '<a href="' + p.postUrl + '" target="_blank" style="font-size:.7rem;color:var(--blue)">View</a>' : '—') + '</td></tr>'
   ).join('');
 }
 
@@ -6293,7 +6345,7 @@ window.buildRichHighlightSections=function(ev){const h=ev.home?.name||'Home',a=e
   syncPostLogFromCloud(false);
   window.renderPostLog=function(){const tb=document.getElementById('log-tbody');if(!tb)return;const es=logEntries().map(x=>x[1]).sort((a,b)=>(b.ts||0)-(a.ts||0));tb.innerHTML=es.length?es.map(p=>'<tr><td>'+ (p.title||'—')+'</td><td><button class="btn-ghost btn-xs" onclick="navigator.clipboard.writeText(\''+(p.postId||'')+'\')">'+(p.postId||'—')+'</button></td><td>'+(p.league||'—')+'</td><td>'+(p.thumb?'🖼️ Yes':'—')+'</td><td>'+(p.status||'draft')+'</td><td>'+(p.hasHL?'✓':'—')+'</td><td>'+(p.ts?new Date(p.ts).toLocaleString():'—')+'</td><td>'+(p.postUrl?'<a href="'+p.postUrl+'" target="_blank">View</a>':'—')+'</td></tr>').join(''):'<tr><td colspan="8">No posts yet.</td></tr>';};
   window.syncPostLogFromBlogger=async function(silent=false){if(!accessToken||!CFG.blogId){if(!silent)toast('Sign in and set Blog ID first','w');return}try{let pageToken='',items=[];do{const q='https://www.googleapis.com/blogger/v3/blogs/'+CFG.blogId+'/posts?maxResults=500&fetchBodies=false'+(pageToken?'&pageToken='+encodeURIComponent(pageToken):'');const r=await fetch(q,{headers:{Authorization:'Bearer '+accessToken}});if(!r.ok)throw Error('HTTP '+r.status);const d=await r.json();items.push(...(d.items||[]));pageToken=d.nextPageToken||'';}while(pageToken);let synced=0;items.forEach(p=>{const labels=p.labels||[];const markers=labels.filter(x=>x.indexOf('s803:')===0);if(!markers.length){const title=String(p.title||'').toLowerCase();const match=allEvents.find(ev=>{const a=(ev.home?.name||ev.name||'').toLowerCase(),b=(ev.away?.name||'').toLowerCase();return a&&title.includes(a)&&(b?title.includes(b):true)});if(match)markers.push('s803:'+evKey(match));}markers.forEach(marker=>{const k=marker.slice(5);if(!k||k==='hl')return;postLog[k]={...(postLog[k]||{}),postId:p.id,postUrl:p.url,title:p.title,status:p.status,searchDescription:p.searchDescription||postLog[k]?.searchDescription||'',bloggerSyncedAt:Date.now(),ts:postLog[k]?.ts||Date.now()};synced++;});});saveV10();renderPostLog();renderPostLogDiagnostics();updateStats();if(!silent)toast('Synced '+synced+' Sports 803 post IDs/URLs from Blogger ✓','s')}catch(e){console.warn('[Blogger sync]',e.message);if(!silent)toast('Blogger sync failed: '+e.message,'e')}};
-  window.renderPostLogDiagnostics=function(){const el=document.getElementById('post-log-diagnostics-body');if(!el)return;const es=logEntries();const ids={};es.forEach(([k,v])=>{if(v.postId)(ids[v.postId]??=[]).push(k)});const dup=Object.entries(ids).filter(([,ks])=>ks.length>1).map(([id])=>id);el.innerHTML='Total entries: '+es.length+' · with postId: '+es.filter(([,v])=>v.postId).length+' · hasHL: '+es.filter(([,v])=>v.hasHL).length+' · duplicate postIds: '+(dup.join(', ')||'none')+' · orphaned race keys: '+es.filter(([k])=>k.startsWith('race_')).length;};
+  window.renderPostLogDiagnostics=function(){const el=document.getElementById('post-log-diagnostics-body');if(!el)return;const es=logEntries();const ids={};es.forEach(([k,v])=>{if(v.postId)(ids[v.postId]??=[]).push(k)});const dup=Object.entries(ids).filter(([,ks])=>ks.length>1).map(([id])=>id);el.innerHTML='Total entries: '+es.length+' · with postId: '+es.filter(([,v])=>v.postId).length+' · hasHL: '+es.filter(([,v])=>v.hasHL).length+' · SuperSport highlights: '+es.filter(([,v])=>v.hlSource==='supersport').length+' · duplicate postIds: '+(dup.join(', ')||'none')+' · orphaned race keys: '+es.filter(([k])=>k.startsWith('race_')).length;};
   window.repairPostLog=function(){postLog=migratePostLog(postLog);prunePostLog();saveV10();renderPostLog();renderPostLogDiagnostics();toast('Post log repaired ✓','s');};
   // Rebind manual URL preview without changing existing UI.
   document.addEventListener('input',e=>{if(e.target.id==='hl-manual-post-url')updateHLResolution();});

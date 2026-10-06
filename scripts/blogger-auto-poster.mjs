@@ -23,6 +23,9 @@ const ONEBALL_LIST_URL = 'https://oneball.live/list.json';
 const TSDB_API = 'https://www.thesportsdb.com/api/v1/json/3';
 const IMGBB_API = 'https://api.imgbb.com/1/upload';
 const USER_AGENT = 'Sports803-Blogger-AutoPoster/1.0';
+const SUPERSPORT_BASE = 'https://supersport.com';
+const SUPERSPORT_SPORT_MAP = { soccer: 'football', football: 'football', mma: 'mma', basketball: 'basketball', rugby: 'rugby', cricket: 'cricket', golf: 'golf', tennis: 'tennis', motorsport: 'motorsport', racing: 'motorsport', cycling: 'cycling' };
+const superSportCache = new Map();
 const PLAYER_DATA_MAX_EVENTS = 80;
 const PLAYER_DATA_CONCURRENCY = 4;
 const PLAYER_DATA_TSDB_MAX_CALLS = 20;
@@ -249,6 +252,45 @@ function streamLinks(event) {
   }
   return [...new Set(values)];
 }
+// v13: SuperSport highlights source. Fetches supersport.com/{sport}/videos,
+// parses the Next.js __next_f payload, extracts the YouTube embed or HLS URL,
+// and always wraps it in the Sports 803 player with ?embed= or ?mora=.
+function supersportSportFor(event) { return SUPERSPORT_SPORT_MAP[text(event?.league?.sport || event?.sport).toLowerCase()] || null; }
+// v13: Proxy fetch with a bounded four-proxy order; short shell responses are rejected.
+async function fetchSuperSportPage(url, timeoutMs = 15000) {
+  const proxies = [u => `https://r.jina.ai/http://${u.replace(/^https?:\/\//i, '')}`, u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`, u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`, u => `https://corsproxy.io/?url=${encodeURIComponent(u)}`];
+  for (const proxy of proxies) { try { const response = await fetch(proxy(url), { headers: { 'X-Return-Format': 'html', 'user-agent': USER_AGENT }, signal: AbortSignal.timeout(timeoutMs) }); if (response.ok) { const html = await response.text(); if (html.length > 500) return html; } } catch (error) { console.warn(`[SuperSport] proxy failed: ${error.message}`); } }
+  return '';
+}
+// v13: Decode Next.js flight chunks and return only secure, verified media URLs.
+function extractSuperSportVideo(html, pageUrl) {
+  const chunks = [], source = String(html || ''); let match; const chunkRe = /self\.__next_f\.push\(\[1,\s*("(?:\\.|[^"\\])*")\s*\]\)/g;
+  while ((match = chunkRe.exec(source))) { try { chunks.push(JSON.parse(match[1])); } catch {} }
+  const blob = chunks.join('\n') + '\n' + source;
+  const hls = blob.match(/https:\\?\/\\?\/vod\.supersport\.com[\s\S]*?\.m3u8(?:\?[^\s"'\\]+)?/i), yt = blob.match(/https:\\?\/\\?\/www\.youtube\.com\\?\/embed\\?\/([A-Za-z0-9_-]+)/i);
+  const sourceUrl = hls ? hls[0].replace(/\\\//g, '/') : yt ? `https://www.youtube.com/embed/${yt[1]}` : '';
+  if (!/^https:\/\//i.test(sourceUrl)) return null;
+  const title = ((blob.match(/"title"\s*:\s*"((?:\\.|[^"\\])+)"/i) || [])[1] || (source.match(/<title[^>]*>([^<]+)/i) || [])[1] || '').replace(/\\"/g, '"').trim();
+  const thumbnail = ((source.match(/<meta[^>]+(?:property|name)=["']og:image["'][^>]+content=["']([^"']+)/i) || blob.match(/"image"\s*:\s*"(https:\\?\/\\?\/images\.supersport\.com[^"\\]+)/i) || [])[1] || '').replace(/\\\//g, '/');
+  return { title: title || 'SuperSport Highlights', source: hls ? 'm3u8' : 'youtube', sourceUrl, thumbnail, pageUrl };
+}
+// v13: Match one recent SuperSport listing item and fetch only its video page.
+async function findSuperSportHighlight(event) {
+  if (process.env.SUPERSPORT_HIGHLIGHTS === '0' || isRace(event) || event?.type === 'race') return null;
+  const sport = supersportSportFor(event); if (!sport) return null;
+  const key = eventKey(event, 0), cached = superSportCache.get(key); if (cached && Date.now() - cached.ts < 6 * 3600000) return cached.value;
+  try {
+    const listing = await fetchSuperSportPage(`${SUPERSPORT_BASE}/${sport}/videos`); if (!listing) return null;
+    const links = new Set(), re = new RegExp(`(?:"url"\\s*:\\s*|href=["'])(/${sport}/video/[^"']+)`, 'gi'); let match;
+    while ((match = re.exec(listing)) && links.size < 25) links.add(match[1].replace(/\\u0026/g, '&'));
+    const candidates = [...links].filter(url => oneBallMatchFound(url, homeName(event), awayName(event))).sort((a, b) => Number(/highlight/i.test(b)) - Number(/highlight/i.test(a)));
+    if (!candidates.length) { superSportCache.set(key, { ts: Date.now(), value: null }); return null; }
+    const pageUrl = SUPERSPORT_BASE + candidates[0], video = extractSuperSportVideo(await fetchSuperSportPage(pageUrl), pageUrl); if (!video) return null;
+    const playerUrl = `${PLAYER_BASE}?${video.source === 'm3u8' ? 'mora' : 'embed'}=${encodeURIComponent(video.sourceUrl)}`;
+    const result = { url: playerUrl, playerUrl, source: 'supersport', sourceKind: video.source, rawSource: video.sourceUrl, pageUrl, matchId: null, title: `${homeName(event)} vs ${awayName(event)} Highlights`, thumbnail: video.thumbnail || '' };
+    superSportCache.set(key, { ts: Date.now(), value: result }); return result;
+  } catch (error) { console.warn(`[SuperSport] ${error.message}`); return null; }
+}
 
 // ============================================================================
 // TEAM MATCHING
@@ -426,7 +468,8 @@ function dashboardSections(event, mode) {
   return playerDataSections(event) + base;
 }
 function playerIframe(event, streams) {
-  const player = playerUrlFor(event, streams);
+  const direct = streams.find(url => /\/player\.html\?(?:mora|embed)=/i.test(String(url || '')));
+  const player = direct || playerUrlFor(event, streams);
   return player ? `<div style="margin:18px 0;position:relative;padding-bottom:56.25%;height:0;overflow:hidden"><iframe loading="lazy" allow="encrypted-media" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0" src="${htmlEscape(player)}" frameborder="0" scrolling="no" allowfullscreen></iframe></div>` : '';
 }
 function previewHtml(event, streams) { return dashboardSections(event, 'preview') + playerIframe(event, streams); }
@@ -769,10 +812,13 @@ async function processEvents(events, ctx) {
     try {
       key = eventKey(event, index);
       const marker = markerFor(key), streams = streamLinks(event), final = isFinal(event);
+      let superSport = null;
+      if (final && event.type === 'match' && !event.externalSources?.some(source => source.source === 'onetv')) superSport = await findSuperSportHighlight(event);
+      if (superSport) { event.highlightsUrl = superSport.playerUrl; event.replayUrl = superSport.pageUrl; event.externalSources = [...(event.externalSources || []), { url: superSport.rawSource, type: superSport.sourceKind === 'm3u8' ? 'mora' : 'embed', source: 'supersport' }]; }
       existing = byMarker.get(marker) || null;
       const label = isRace(event) ? eventName(event) : displayEventName(event);
       title = isRace(event) ? (final ? `${label} – Full Race Replay | Sports 803` : `${label} – Race Preview & Live Stream | Sports 803`) : (final ? `${label} – Highlights & Replay | Sports 803` : `${label} – ${leagueName(event)} Live Stream | Sports 803`);
-      const desiredPlayer = playerUrlFor(event, streams);
+      const desiredPlayer = superSport?.playerUrl || playerUrlFor(event, streams);
       const shouldUpdate = existing ? await needsUpdate(existing, { final, desiredPlayer }, ctx) : false;
       if (existing && !shouldUpdate) {
         counts.skipped++;
@@ -802,7 +848,7 @@ async function processEvents(events, ctx) {
       }
       byMarker.set(marker, post);
       console.log(`${action} ${post.id}: ${title}`);
-      logEvent({ key, action, postId: post.id, title });
+      logEvent({ key, action, postId: post.id, title, hlSource: superSport?.source || '' });
       await sleepFn(500 + Math.random() * 300);
     } catch (error) {
       counts.failed++;
@@ -856,7 +902,7 @@ export {
   text, pick, htmlEscape, stableHash, isFinal, isDead, eventName, eventScore, leagueName, leagueId, canonicalLeague, isRace,
   localDate, isToday, streamLinks, teamKey, teamsMatch, pairMatch,
   attachExternalSources, buildFeedIndex, replayLinks, eventKey, markerFor, labelsFor, playerUrlFor,
-  dashboardSections, raceSections, previewSections, highlightsSections, playerDataSections, contentHasPlayer,
+  dashboardSections, raceSections, previewSections, highlightsSections, playerDataSections, contentHasPlayer, supersportSportFor, fetchSuperSportPage, extractSuperSportVideo, findSuperSportHighlight,
   teamLogoUrl, saveLogoCache, resetLogoCache, logoMarkup, thumbnailSvg, uploadImgBb,
   accessToken, listPosts, getPostBody, getPostForRepair, repairMalformedPlayerUrls, bloggerWrite, processEvents, parseDashboardEvent, hydrateEventPlayerData, enrichEventsWithPlayerData, fetchLeague, fetchDashboardEvents, fetchRacingFromTSDB, leagueFetchStatus, leagueFetchSource, normalizePlayerBase, normalizePlayerUrlsInHtml
 };

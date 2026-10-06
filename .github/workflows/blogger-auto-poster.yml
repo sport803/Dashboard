@@ -53,6 +53,7 @@ jobs:
           EVENT_TIMEZONE: ${{ vars.EVENT_TIMEZONE }}
           AUTO_POST_LEAGUES: ${{ vars.AUTO_POST_LEAGUES }}
           ENRICH_PLAYER_DATA: ${{ vars.ENRICH_PLAYER_DATA }}
+          SUPERSPORT_HIGHLIGHTS: ${{ vars.SUPERSPORT_HIGHLIGHTS }}
           PLAYER_BASE_URL: https://www.sport803.online/p/player.html
           REPAIR_PLAYER_SLASHES: ${{ inputs.repair_player_slashes }}
         run: node scripts/blogger-auto-poster.mjs
