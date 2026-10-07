@@ -1968,6 +1968,7 @@ button:disabled { opacity: .4; cursor: not-allowed; transform: none !important; 
     <div class="card">
       <div class="card-title">Blogger / Google OAuth</div>
       <div class="form-group"><label>Active Blogger Blog</label><select id="cfg-blog-select" onchange="selectBloggerBlog(this.value)"><option value="">Sign in to load your blogs</option></select><div id="blogger-status" style="font-size:.68rem;color:var(--muted2);margin-top:6px">Sign in with Google to load all blogs you can manage.</div></div>
+      <div id="blogger-connection-health" role="status" aria-live="polite" data-state="disconnected" style="display:flex;align-items:center;gap:8px;padding:9px 11px;margin:10px 0 14px;border:1px solid var(--line);border-radius:8px;background:var(--bg3);font-size:.72rem;color:var(--muted2)"><span aria-hidden="true" style="width:8px;height:8px;border-radius:50%;background:var(--muted2);flex:0 0 auto"></span><span>Not connected — sign in to check Blogger access.</span></div>
       <div class="form-group"><label>Selected Blog ID</label><input type="text" id="cfg-blogid" placeholder="Loaded automatically after sign-in" readonly></div>
       <div class="form-group"><label>Google OAuth Client ID</label><input type="text" id="cfg-clientid" placeholder="xxx.apps.googleusercontent.com"></div>
       <div style="display:flex;gap:7px;flex-wrap:wrap"><button class="btn-red btn-sm" onclick="saveCFG()">💾 Save</button><button class="btn-ghost btn-sm" onclick="refreshBloggerBlogs()">🔄 Refresh Blogs</button></div>
@@ -2903,6 +2904,19 @@ function updateAuthUI(isSignedIn) {
   renderBloggerBlogs();
 }
 
+function setBloggerConnectionHealth(state, message) {
+  const box = document.getElementById('blogger-connection-health');
+  if (!box) return;
+  const colors = { ready: 'var(--green)', checking: 'var(--gold)', disconnected: 'var(--muted2)', error: 'var(--red)' };
+  box.dataset.state = state;
+  box.style.color = state === 'ready' ? 'var(--green)' : state === 'error' ? 'var(--red)' : 'var(--muted2)';
+  box.style.borderColor = state === 'ready' ? 'var(--green)' : state === 'error' ? 'var(--red)' : 'var(--line)';
+  const dot = box.querySelector('span[aria-hidden="true"]');
+  if (dot) dot.style.background = colors[state] || colors.disconnected;
+  const label = box.querySelector('span:not([aria-hidden])');
+  if (label) label.textContent = message;
+}
+
 function initOAuth() {
   CFG.clientId = CFG.clientId || EVENT_BUILTIN_CLIENT_ID;
   if (!window.google?.accounts?.oauth2) return false;
@@ -2971,22 +2985,26 @@ function renderBloggerBlogs() {
   if (!accessToken) {
     select.innerHTML = '<option value="">Sign in to load your blogs</option>';
     if (status) status.textContent = 'Sign in with Google to load all blogs you can manage.';
+    setBloggerConnectionHealth('disconnected', 'Not connected — sign in to check Blogger access.');
     return;
   }
   if (!bloggerBlogs.length) {
     select.innerHTML = '<option value="">No blogs loaded — click Refresh Blogs</option>';
     if (status) status.textContent = 'Signed in, but no blog list is loaded yet.';
+    setBloggerConnectionHealth('checking', 'Signed in — refresh blogs to verify access and choose a publishing destination.');
     return;
   }
   select.innerHTML = '<option value="">— Select blog —</option>' + bloggerBlogs.map(blog => '<option value="' + escLiveTV(blog.id) + '">' + escLiveTV(blog.name || blog.url || blog.id) + '</option>').join('');
   select.value = current;
   if (status) status.textContent = bloggerUser?.name ? bloggerUser.name + ' · ' + bloggerBlogs.length + ' blog(s) found' : bloggerBlogs.length + ' blog(s) found';
+  setBloggerConnectionHealth(current ? 'ready' : 'checking', current ? 'Connected — Blogger access verified; a blog is selected.' : 'Connected — select a blog to enable publishing.');
 }
 
 function selectBloggerBlog(blogId) {
   CFG.blogId = String(blogId || '');
   set('cfg-blogid', CFG.blogId);
   saveAll();
+  renderBloggerBlogs();
   if (CFG.blogId) toast('Active Blogger blog selected ✓', 's');
 }
 
@@ -3020,6 +3038,7 @@ async function fetchBloggerInfo() {
     if (CFG.blogId && window.syncPostLogFromBlogger) window.syncPostLogFromBlogger(true);
   } catch (e) {
     console.warn('[Blogger auth]', e.message);
+    setBloggerConnectionHealth('error', 'Could not verify Blogger access — ' + e.message);
     toast('Could not load Blogger blogs: ' + e.message, 'e');
   }
 }
