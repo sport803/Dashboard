@@ -89,7 +89,7 @@ const ENV_NAMES = {
   imgbbKey: ['IMGBB_API_KEY']
 };
 function loadConfig(env = process.env) {
-  const dryRun = env.DRY_RUN === '1';
+  const dryRun = ['1', 'true'].includes(text(env.DRY_RUN).toLowerCase());
   const read = (field) => ENV_NAMES[field].map(name => text(env[name])).find(Boolean) || '';
   const needed = dryRun ? ['blogId'] : Object.keys(ENV_NAMES);
   const missing = needed.filter(field => !read(field)).map(field => ENV_NAMES[field][0]);

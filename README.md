@@ -74,7 +74,10 @@ The refresh token is required because GitHub Actions does not have a browser ses
 ### Running it
 
 - The schedule runs every five minutes after the secrets are present.
-- Use **Actions → Blogger event auto-poster → Run workflow** for a manual run.
+- Use **Actions → Blogger event auto-poster → Run workflow** for a manual run. Select **dry_run** to inspect eligible events without Blogger writes or thumbnail uploads; this preview needs only `BLOGGER_BLOG_ID` and does not require OAuth or ImgBB secrets. Leave it off to publish normally.
+- Select **repair_player_slashes** only when repairing older malformed player iframe URLs; repair takes precedence over dry-run if both inputs are selected.
 - A run with no matching stream events safely makes no Blogger changes.
+
+The Dashboard's **Settings → Blogger / Google OAuth** panel shows a live connection state: disconnected, signed in and awaiting blog access, connected with a blog selected, or an access error. Use **Refresh Blogs** to re-check Blogger access and reload the destination list.
 
 The existing dashboard UI still supports interactive Google sign-in, manual posting, bulk posting, and its browser-tab scheduler. The GitHub Action is the unattended path.

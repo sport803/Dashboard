@@ -3,8 +3,13 @@ name: Blogger event auto-poster
 on:
   workflow_dispatch:
     inputs:
+      dry_run:
+        description: 'Preview eligible events without writing to Blogger or uploading thumbnails'
+        required: false
+        default: false
+        type: boolean
       repair_player_slashes:
-        description: 'Repair existing Blogger iframe URLs containing player.html//?'
+        description: 'Repair existing Blogger iframe URLs containing player.html//? (takes precedence over dry run)'
         required: false
         default: 'false'
         type: boolean
@@ -34,13 +39,28 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.BLOGGER_GOOGLE_CLIENT_SECRET }}
           BLOGGER_REFRESH_TOKEN: ${{ secrets.BLOGGER_REFRESH_TOKEN }}
           IMGBB_API_KEY: ${{ secrets.IMGBB_API_KEY }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          REPAIR_PLAYER_SLASHES: ${{ inputs.repair_player_slashes }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
-          if [ -n "$BLOG_ID" ] && [ -n "$GOOGLE_CLIENT_ID" ] && [ -n "$GOOGLE_CLIENT_SECRET" ] && [ -n "$BLOGGER_REFRESH_TOKEN" ] && [ -n "$IMGBB_API_KEY" ]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$DRY_RUN" = "true" ] && [ "$REPAIR_PLAYER_SLASHES" != "true" ]; then
+            if [ -n "$BLOG_ID" ]; then
+              echo "ready=true" >> "$GITHUB_OUTPUT"
+              echo "Dry run selected: only BLOGGER_BLOG_ID is required; no Blogger writes will be made."
+            else
+              echo "ready=false" >> "$GITHUB_OUTPUT"
+              echo "Dry run needs BLOGGER_BLOG_ID to identify the target blog."
+            fi
+          elif [ -n "$BLOG_ID" ] && [ -n "$GOOGLE_CLIENT_ID" ] && [ -n "$GOOGLE_CLIENT_SECRET" ] && [ -n "$BLOGGER_REFRESH_TOKEN" ] && [ -n "$IMGBB_API_KEY" ]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
             echo "Blogger secrets are not configured; skipping this run."
           fi
+
+      - name: Explain skipped run
+        if: steps.credentials.outputs.ready != 'true'
+        run: echo 'No publisher changes were made. Review the credential message above and configure missing repository secrets if needed.'
 
       - name: Run Blogger event publisher
         if: steps.credentials.outputs.ready == 'true'
@@ -56,4 +76,5 @@ jobs:
           SUPERSPORT_HIGHLIGHTS: ${{ vars.SUPERSPORT_HIGHLIGHTS }}
           PLAYER_BASE_URL: https://www.sport803.online/p/player.html
           REPAIR_PLAYER_SLASHES: ${{ inputs.repair_player_slashes }}
+          DRY_RUN: ${{ inputs.dry_run }}
         run: node scripts/blogger-auto-poster.mjs
