@@ -8,6 +8,11 @@ on:
         required: false
         default: 'false'
         type: boolean
+      repair_oneball_replay_urls:
+        description: 'Change OneBall live iframe URLs to replay URLs on all auto-poster event posts'
+        required: false
+        default: 'false'
+        type: boolean
   schedule:
     - cron: '*/5 * * * *'
 
@@ -66,4 +71,5 @@ jobs:
           SUPERSPORT_HIGHLIGHTS: ${{ vars.SUPERSPORT_HIGHLIGHTS }}
           PLAYER_BASE_URL: https://www.sport803.online/p/player.html
           REPAIR_PLAYER_SLASHES: ${{ inputs.repair_player_slashes }}
+          REPAIR_ONEBALL_REPLAY_URLS: ${{ inputs.repair_oneball_replay_urls }}
         run: node scripts/blogger-auto-poster.mjs

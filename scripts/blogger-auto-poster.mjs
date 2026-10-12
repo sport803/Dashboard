@@ -643,6 +643,47 @@ async function repairMalformedPlayerUrls(token, blogId, posts, sleepFn = sleep) 
   }
   return counts;
 }
+function rewriteOneBallReplayIframes(content) {
+  let changed = false;
+  const updatedContent = String(content || '').replace(/<iframe\b[^>]*>/gi, iframe => {
+    return iframe.replace(/(\bsrc\s*=\s*)(["'])(.*?)\2/i, (attribute, prefix, quote, src) => {
+      let playerUrl;
+      try { playerUrl = new URL(src); } catch { return attribute; }
+      if (!/^(?:www\.)?sport803\.online$/i.test(playerUrl.hostname) || playerUrl.pathname.toLowerCase() !== '/p/player.html' || !/oneball\.live/i.test(src)) return attribute;
+      const replaySrc = src
+        .replace(/(https?:\/\/oneball\.live\/)live\//gi, '$1replay/')
+        .replace(/(https?%3A%2F%2Foneball\.live%2F)live%2F/gi, '$1replay%2F');
+      if (replaySrc === src) return attribute;
+      changed = true;
+      return `${prefix}${quote}${replaySrc}${quote}`;
+    });
+  });
+  return { content: updatedContent, changed };
+}
+async function repairOneBallReplayUrls(token, blogId, posts, sleepFn = sleep) {
+  const eventPosts = posts.filter(post => (post.labels || []).some(label => label.startsWith('s803:event:')));
+  const counts = { scanned: 0, updated: 0, skipped: 0, failed: 0 };
+  for (const listed of eventPosts) {
+    counts.scanned++;
+    try {
+      const post = await getPostForRepair(token, blogId, listed.id);
+      const { content, changed } = rewriteOneBallReplayIframes(post.content);
+      if (!changed) { counts.skipped++; continue; }
+      const payload = { kind: 'blogger#post', blog: { id: blogId }, title: post.title || '', content, labels: post.labels || [] };
+      if (post.published) payload.published = post.published;
+      await bloggerWrite(token, blogId, post.id, payload);
+      counts.updated++;
+      console.log(`repaired OneBall replay URL ${post.id}: ${post.title || '(untitled)'}`);
+      logEvent({ action: 'repaired-oneball-replay-url', postId: post.id, title: post.title || '' });
+      await sleepFn(150);
+    } catch (error) {
+      counts.failed++;
+      console.error(`OneBall replay URL repair failed ${listed.id}: ${error.message}`);
+      logEvent({ action: 'oneball-replay-repair-failed', postId: listed.id, error: error.message });
+    }
+  }
+  return counts;
+}
 async function bloggerWrite(token, blogId, postId, payload) {
   const url = postId ? `${BLOGGER_API}/blogs/${encodeURIComponent(blogId)}/posts/${encodeURIComponent(postId)}` : `${BLOGGER_API}/blogs/${encodeURIComponent(blogId)}/posts/`;
   return withRetry(async () => {
@@ -898,6 +939,14 @@ async function processEvents(events, ctx) {
 
 async function main() {
   const config = loadConfig(); // validates env + timezone before any network call
+  if (process.env.REPAIR_ONEBALL_REPLAY_URLS === '1' || process.env.REPAIR_ONEBALL_REPLAY_URLS === 'true') {
+    const token = await accessToken(config);
+    const posts = await listPosts(token, config.blogId);
+    const counts = await repairOneBallReplayUrls(token, config.blogId, posts);
+    console.log(JSON.stringify({ mode: 'repair-oneball-replay-urls', ...counts }));
+    if (counts.failed > 0) process.exitCode = 1;
+    return;
+  }
   if (process.env.REPAIR_PLAYER_SLASHES === '1' || process.env.REPAIR_PLAYER_SLASHES === 'true') {
     const token = await accessToken(config);
     const posts = await listPosts(token, config.blogId);
@@ -941,7 +990,7 @@ export {
   attachExternalSources, buildFeedIndex, replayLinks, eventKey, markerFor, labelsFor, playerUrlFor,
   dashboardSections, raceSections, previewSections, highlightsSections, playerDataSections, contentHasPlayer, supersportSportFor, fetchSuperSportPage, extractSuperSportVideo, findSuperSportHighlight,
   teamLogoUrl, saveLogoCache, resetLogoCache, logoMarkup, thumbnailSvg, rasterizeThumbnail, uploadImgBb,
-  accessToken, listPosts, getPostBody, getPostForRepair, repairMalformedPlayerUrls, bloggerWrite, processEvents, needsUpdate, parseDashboardEvent, hydrateEventPlayerData, enrichEventsWithPlayerData, fetchLeague, fetchDashboardEvents, fetchRacingFromTSDB, leagueFetchStatus, leagueFetchSource, normalizePlayerBase, normalizePlayerUrlsInHtml
+  accessToken, listPosts, getPostBody, getPostForRepair, repairMalformedPlayerUrls, rewriteOneBallReplayIframes, repairOneBallReplayUrls, bloggerWrite, processEvents, needsUpdate, parseDashboardEvent, hydrateEventPlayerData, enrichEventsWithPlayerData, fetchLeague, fetchDashboardEvents, fetchRacingFromTSDB, leagueFetchStatus, leagueFetchSource, normalizePlayerBase, normalizePlayerUrlsInHtml
 };
 
 const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
