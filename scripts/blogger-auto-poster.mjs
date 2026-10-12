@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // Sports 803 Blogger auto-poster (hardened). Lives at scripts/blogger-auto-poster.mjs.
-// ESM so it runs as `node scripts/blogger-auto-poster.mjs` regardless of package.json "type". No npm dependencies.
+// ESM so it runs as `node scripts/blogger-auto-poster.mjs` regardless of package.json "type".
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import sharp from 'sharp';
 
 // ============================================================================
 // CONFIG
@@ -18,7 +19,6 @@ const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const ESPN_API = 'https://site.api.espn.com/apis/site/v2/sports';
 function normalizePlayerBase(value) { return text(value).replace(/\/+$/, ''); }
 const PLAYER_BASE = normalizePlayerBase(process.env.PLAYER_BASE_URL || 'https://www.sport803.online/p/player.html');
-const PPVTV_MATCHES_API = 'https://august.ppvtv.icu/api/matches.json';
 const ONEBALL_LIST_URL = 'https://oneball.live/list.json';
 const TSDB_API = 'https://www.thesportsdb.com/api/v1/json/3';
 const IMGBB_API = 'https://api.imgbb.com/1/upload';
@@ -34,6 +34,7 @@ let tsdbPlayerCalls = 0;
 
 const FETCH_TIMEOUT_MS = 15_000;
 const MAX_LABELS = 20; // Blogger's per-post label limit
+const THUMBNAIL_LABEL = 's803:thumbnail';
 const LOGO_TTL_MS = 30 * 24 * 60 * 60 * 1000; // found logos: 30 days
 const LOGO_MISS_TTL_MS = 24 * 60 * 60 * 1000; // lookup succeeded, no badge: 1 day
 const LOGO_ERROR_TTL_MS = 5 * 60 * 1000; // lookup failed: 5 minutes
@@ -314,10 +315,9 @@ function pairMatch(event, home, away) {
 }
 
 // ============================================================================
-// EXTERNAL STREAM SOURCES (OneBall / PPVTV)
+// EXTERNAL STREAM SOURCES (OneBall only)
 // ============================================================================
 
-function sourceUrl(value) { return /^https:\/\//i.test(text(value)) ? text(value) : ''; }
 function oneBallUrl(matchId) { return `https://oneball.live/live/${encodeURIComponent(String(matchId).replace(/\.html?$/i, ''))}.html`; }
 function normalizePlayerUrlsInHtml(html) {
   return String(html || '').replace(/((?:https?:\/\/)[^"'<>\s]+\/player\.html)\/+\?/gi, '$1?');
@@ -333,25 +333,13 @@ function sports803PlayerUrl(sources) {
   return params.length ? normalizePlayerUrlsInHtml(`${PLAYER_BASE}?${params.join('&')}`) : '';
 }
 async function loadExternalSources() {
-  const result = { oneball: [], ppv: [] };
+  const result = { oneball: [] };
   try {
     const raw = await getJson(ONEBALL_LIST_URL, { headers: { accept: 'application/json', 'user-agent': USER_AGENT } });
     const entries = Array.isArray(raw) ? raw : raw?.matches || raw?.data || raw?.list || [];
     result.oneball = entries.map(entry => ({ id: entry.nami_id || entry.id, home: entry.home_team || entry.home_team_name || entry.home?.name || entry.home, away: entry.away_team || entry.away_team_name || entry.away?.name || entry.away })).filter(entry => entry.id && entry.home && entry.away);
     console.log(`[OneBall] loaded ${result.oneball.length} match links`);
   } catch (error) { console.warn(`[OneBall] ${error.message}`); }
-  try {
-    const payload = await getJson(`${PPVTV_MATCHES_API}?_ts=${Date.now()}`, { headers: { accept: 'application/json', 'user-agent': USER_AGENT } });
-    const matches = Array.isArray(payload) ? payload : payload?.matches || payload?.data?.matches || [];
-    result.ppv = matches.map(match => {
-      let home = match.teams?.home?.name || match.home_team?.name || match.home_team || match.home?.name || '';
-      let away = match.teams?.away?.name || match.away_team?.name || match.away_team || match.away?.name || '';
-      if (!home || !away) { const parts = text(match.title).split(/\s+(?:at|vs?\.?|v|x|versus)\s+/i); if (parts.length > 1) [home, away] = [parts[0], parts.slice(1).join(' vs ')]; }
-      const urls = [match.embed_url, match.embedUrl, ...(Array.isArray(match.servers) ? match.servers.flatMap(server => [server?.embed_url, server?.embedUrl, server?.url]) : [])].map(sourceUrl).filter(Boolean);
-      return { home, away, urls: [...new Set(urls)] };
-    }).filter(match => match.home && match.away && match.urls.length);
-    console.log(`[PPVTV] loaded ${result.ppv.length} match links`);
-  } catch (error) { console.warn(`[PPVTV] ${error.message}`); }
   return result;
 }
 /** Map keyed by "teamKey(home)|teamKey(away)" AND the reversed key; first entry wins. */
@@ -379,14 +367,13 @@ function uniqueByUrl(sources) {
 }
 async function attachExternalSources(events, feeds) {
   feeds = feeds || await loadExternalSources();
-  const oneIndex = buildFeedIndex(feeds.oneball), ppvIndex = buildFeedIndex(feeds.ppv);
+  const oneball = feeds.oneball || [];
+  const oneIndex = buildFeedIndex(oneball);
   return events.map(event => {
     if (event.type !== 'match') return { ...event, externalSources: [] };
     const sources = [];
-    const one = findFeedMatch(oneIndex, feeds.oneball, event);
+    const one = findFeedMatch(oneIndex, oneball, event);
     if (one) sources.push({ url: oneBallUrl(one.id), type: 'one', source: 'onetv', matchId: String(one.id), home: one.home, away: one.away });
-    const ppv = findFeedMatch(ppvIndex, feeds.ppv, event);
-    if (ppv) sources.push(...ppv.urls.map(url => ({ url, type: 'embed', source: 'ppvtv', home: ppv.home, away: ppv.away })));
     // oneballId is populated here (instead of deleting the branch in replayLinks) so the replay URL feature keeps working.
     return { ...event, externalSources: uniqueByUrl(sources), ...(one ? { oneballId: String(one.id) } : {}) };
   });
@@ -410,12 +397,12 @@ function eventKey(event, index) {
 }
 function markerFor(key) { return `s803:event:${stableHash(key)}`; }
 /** Marker first (must always survive), then the status label, then the rest, capped at `limit` total. */
-function labelsFor(event, key, final = false, limit = MAX_LABELS) {
+function labelsFor(event, key, final = false, limit = MAX_LABELS, hasThumbnail = false) {
   const marker = markerFor(key);
   const sport = text(event.sport || event.category || '').toLowerCase();
   const status = final ? 'Highlights' : 'Event Stream'; // 'Highlights' drives update detection, so keep it early
   const others = [...new Set([
-    status, leagueName(event), leagueId(event), sport, isRace(event) ? 'Motorsport' : 'Sports', 'Sports 803',
+    status, ...(hasThumbnail ? [THUMBNAIL_LABEL] : []), leagueName(event), leagueId(event), sport, isRace(event) ? 'Motorsport' : 'Sports', 'Sports 803',
     ...(SPORT_LABELS[sport] || ['Live Sports']),
     ...(homeName(event) ? [homeName(event)] : []), ...(awayName(event) ? [awayName(event)] : [])
   ].filter(Boolean))].filter(label => label !== marker);
@@ -561,14 +548,18 @@ async function thumbnailSvg(event, title, final) {
   const score = eventScore(event), bg1 = final ? '#1a0020' : '#0d1b2a', bg2 = final ? '#350b32' : '#07111f';
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080"><defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="${bg1}"/><stop offset="1" stop-color="${bg2}"/></linearGradient><linearGradient id="stripe" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#e63946"/><stop offset="1" stop-color="#c1121f"/></linearGradient><clipPath id="clipH"><circle cx="480" cy="440" r="132"/></clipPath><clipPath id="clipA"><circle cx="1440" cy="440" r="132"/></clipPath></defs><rect width="1920" height="1080" fill="url(#bg)"/><rect x="0" y="0" width="960" height="1080" fill="${bg1}" opacity=".2"/><rect x="960" y="0" width="960" height="1080" fill="${bg2}" opacity=".25"/><rect x="0" width="18" height="1080" fill="#e63946"/><rect x="1902" width="18" height="1080" fill="#f4a261"/><rect x="650" y="42" width="620" height="74" rx="37" fill="#080c14" opacity=".92"/><text x="960" y="91" fill="#e2e8f0" font-family="Arial,sans-serif" font-size="36" font-weight="700" text-anchor="middle">${htmlEscape(league)}</text><circle cx="480" cy="440" r="142" fill="rgba(255,255,255,.06)" stroke="rgba(255,255,255,.18)" stroke-width="4"/><circle cx="1440" cy="440" r="142" fill="rgba(255,255,255,.06)" stroke="rgba(255,255,255,.18)" stroke-width="4"/>${logoMarkup(hData, 480, 'H', home)}${logoMarkup(aData, 1440, 'A', away)}<circle cx="960" cy="440" r="62" fill="#e63946"/><text x="960" y="453" fill="#fff" font-family="Arial,sans-serif" font-size="32" font-weight="900" text-anchor="middle">${score ? htmlEscape(score) : 'VS'}</text><text x="480" y="690" fill="#fff" font-family="Arial,sans-serif" font-size="40" font-weight="800" text-anchor="middle">${htmlEscape(home)}</text><text x="1440" y="690" fill="#fff" font-family="Arial,sans-serif" font-size="40" font-weight="800" text-anchor="middle">${htmlEscape(away)}</text><text x="960" y="820" fill="rgba(255,255,255,.72)" font-family="Arial,sans-serif" font-size="28" font-weight="600" text-anchor="middle">🕐 ${htmlEscape(date)}</text><rect y="1008" width="1920" height="72" fill="url(#stripe)" opacity=".94"/><text x="960" y="1054" fill="#fff" font-family="Arial,sans-serif" font-size="28" font-weight="800" text-anchor="middle">▶  SPORTS 803 MATCH REPORT</text><rect x="1710" y="24" width="170" height="42" rx="8" fill="rgba(0,0,0,.88)"/><circle cx="1730" cy="45" r="6" fill="#e63946"/><text x="1745" y="54" fill="#fff" font-family="Arial,sans-serif" font-size="20" font-weight="900">SPORTS</text><text x="1812" y="54" fill="#39ff14" font-family="Arial,sans-serif" font-size="20" font-weight="900">803</text></svg>`;
 }
+async function rasterizeThumbnail(svg) {
+  return sharp(Buffer.from(svg)).png().toBuffer();
+}
 async function uploadImgBb(svg, apiKey) {
   const key = text(apiKey);
   if (!key) return '';
+  const png = await rasterizeThumbnail(svg);
   return withRetry(async () => {
-    const fd = new FormData(); fd.append('key', key); fd.append('image', Buffer.from(svg).toString('base64'));
+    const fd = new FormData(); fd.append('key', key); fd.append('image', png.toString('base64'));
     const response = await fetch(IMGBB_API, { method: 'POST', body: fd, signal: timeoutSignal() });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok || !data.success) throw new HttpError(`ImgBB upload failed: ${data.error?.message || response.status}`, { status: response.status });
+    if (!response.ok || !data.success || !data.data?.url) throw new HttpError(`ImgBB PNG upload failed: ${data.error?.message || response.status}`, { status: response.status });
     return data.data.url;
   });
 }
@@ -819,6 +810,8 @@ function contentHasPlayerData(content) {
 }
 async function needsUpdate(existing, { event, final, desiredPlayer }, ctx) {
   if (final && !(existing.labels || []).includes('Highlights')) return true;
+  // Older posts (and posts created during an ImgBB outage) must be repaired once a thumbnail upload works.
+  if (!(existing.labels || []).includes(THUMBNAIL_LABEL)) return true;
   // A post is valid without a highlight/stream iframe. Revisit it when verified
   // player data becomes available so lineups and match details can be enriched later.
   if (event?.playerData && !contentHasPlayerData(existing.content)) {
@@ -855,15 +848,22 @@ async function processEvents(events, ctx) {
         continue;
       }
 
-      // Only now (we are definitely writing) do we build and upload the thumbnail; failure => post without it.
+      // Rasterize and upload on every write; posts are marked only after ImgBB returns a usable image URL.
       const article = final ? highlightsHtml(event, streams) : previewHtml(event, streams);
-      let thumbHtml = '';
+      let thumbHtml = '', thumbUploaded = false;
       try {
         const thumbUrl = await uploadImgBb(await thumbnailSvg(event, title, final), imgbbKey);
-        if (thumbUrl) thumbHtml = `<div><img src="${htmlEscape(thumbUrl)}" style="max-width:100%;height:auto;border-radius:10px;margin-bottom:18px" alt="${htmlEscape(title)}"></div>\n`;
-      } catch (error) { console.warn(`[ImgBB] ${title}: ${error.message}; posting without thumbnail`); }
+        if (thumbUrl) { thumbHtml = `<div><img src="${htmlEscape(thumbUrl)}" style="max-width:100%;height:auto;border-radius:10px;margin-bottom:18px" alt="${htmlEscape(title)}"></div>\n`; thumbUploaded = true; }
+      } catch (error) { console.warn(`[ImgBB] ${title}: ${error.message}`); }
+      if (existing && !thumbUploaded) {
+        counts.failed++;
+        const error = 'thumbnail upload failed; existing post left unchanged';
+        console.error(`[ImgBB] ${title}: ${error}`);
+        logEvent({ key, action: 'failed', postId: existing.id, title, error });
+        continue;
+      }
 
-      const payload = { kind: 'blogger#post', blog: { id: blogId }, title, content: thumbHtml + article, labels: labelsFor(event, key, final), searchDescription: `${eventName(event)} ${final ? 'highlights and replay' : 'live stream'} on Sports 803`.slice(0, 150) };
+      const payload = { kind: 'blogger#post', blog: { id: blogId }, title, content: thumbHtml + article, labels: labelsFor(event, key, final, MAX_LABELS, thumbUploaded), searchDescription: `${eventName(event)} ${final ? 'highlights and replay' : 'live stream'} on Sports 803`.slice(0, 150) };
       let post, action;
       if (!existing) {
         post = await bloggerWrite(token, blogId, null, payload);
@@ -931,8 +931,8 @@ export {
   localDate, isToday, streamLinks, teamKey, teamsMatch, pairMatch,
   attachExternalSources, buildFeedIndex, replayLinks, eventKey, markerFor, labelsFor, playerUrlFor,
   dashboardSections, raceSections, previewSections, highlightsSections, playerDataSections, contentHasPlayer, supersportSportFor, fetchSuperSportPage, extractSuperSportVideo, findSuperSportHighlight,
-  teamLogoUrl, saveLogoCache, resetLogoCache, logoMarkup, thumbnailSvg, uploadImgBb,
-  accessToken, listPosts, getPostBody, getPostForRepair, repairMalformedPlayerUrls, bloggerWrite, processEvents, parseDashboardEvent, hydrateEventPlayerData, enrichEventsWithPlayerData, fetchLeague, fetchDashboardEvents, fetchRacingFromTSDB, leagueFetchStatus, leagueFetchSource, normalizePlayerBase, normalizePlayerUrlsInHtml
+  teamLogoUrl, saveLogoCache, resetLogoCache, logoMarkup, thumbnailSvg, rasterizeThumbnail, uploadImgBb,
+  accessToken, listPosts, getPostBody, getPostForRepair, repairMalformedPlayerUrls, bloggerWrite, processEvents, needsUpdate, parseDashboardEvent, hydrateEventPlayerData, enrichEventsWithPlayerData, fetchLeague, fetchDashboardEvents, fetchRacingFromTSDB, leagueFetchStatus, leagueFetchSource, normalizePlayerBase, normalizePlayerUrlsInHtml
 };
 
 const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
