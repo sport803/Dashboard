@@ -16,9 +16,11 @@ Every five minutes, the workflow:
 
 Normal events with a valid scheduled start time dated **today** are eligible. Racing events use the selected date plus or minus one day so multi-day weekends are not missed. Older unrelated events are still ignored. The default date comparison uses `Africa/Nairobi`; set the optional repository variable `EVENT_TIMEZONE` under **Settings → Secrets and variables → Actions → Variables** when another timezone should define “today”.
 
-For a match with a OneBall listing, the generated article contains a player iframe such as `https://www.sport803.online/p/player.html?one=https://oneball.live/live/<match-id>.html`. The Action uses the stable OneBall match page rather than expiring raw signal URLs; no PPVtv event source is requested or embedded.
+For a live match with a OneBall listing, the generated article contains a player iframe such as `https://www.sport803.online/p/player.html?one=https://oneball.live/live/<match-id>.html`. When the article becomes a replay/highlights post, the iframe switches to `https://www.sport803.online/p/player.html?one=https://oneball.live/replay/<match-id>.html` (only the OneBall path changes from `live` to `replay`). No PPVtv event source is requested or embedded.
 
 Player URLs are normalized before generation and comparison, so the Action uses `player.html?` and never `player.html//?`. To repair existing Blogger posts from the earlier malformed format, run **Actions → Blogger event auto-poster → Run workflow** and enable the `repair_player_slashes` input. That mode scans existing posts, updates only affected iframe bodies, and does not create new posts.
+
+To migrate all historical auto-poster event posts from a OneBall live iframe to the replay page, run the same workflow and enable `repair_oneball_replay_urls`. It scans posts with the `s803:event:` marker and updates only a Sports 803 player iframe whose `one=` source points to `oneball.live/live/`; it does not create posts or change other iframe sources.
 
 The publisher uses bounded HTTP timeouts and retries for transient feed, logo, ImgBB, OAuth, and Blogger failures. It caches successful team-logo lookups between runs, validates its environment before making network calls, limits Blogger labels to 20, and marks posts only after a thumbnail upload succeeds. Existing posts without the thumbnail marker are automatically revisited and repaired; when a thumbnail upload fails, the existing post is left untouched and the run reports the failure for a later retry.
 

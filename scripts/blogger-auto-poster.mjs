@@ -318,7 +318,10 @@ function pairMatch(event, home, away) {
 // EXTERNAL STREAM SOURCES (OneBall only)
 // ============================================================================
 
-function oneBallUrl(matchId) { return `https://oneball.live/live/${encodeURIComponent(String(matchId).replace(/\.html?$/i, ''))}.html`; }
+function oneBallUrl(matchId, mode = 'live') {
+  const route = mode === 'replay' ? 'replay' : 'live';
+  return `https://oneball.live/${route}/${encodeURIComponent(String(matchId).replace(/\.html?$/i, ''))}.html`;
+}
 function normalizePlayerUrlsInHtml(html) {
   return String(html || '').replace(/((?:https?:\/\/)[^"'<>\s]+\/player\.html)\/+\?/gi, '$1?');
 }
@@ -379,10 +382,11 @@ async function attachExternalSources(events, feeds) {
   });
 }
 function replayLinks(event) {
+  // A OneBall-backed highlights post must use its replay page, not its live page or an unrelated fallback.
+  if (event.oneballId) return [`${PLAYER_BASE}?one=${oneBallUrl(event.oneballId, 'replay')}`];
   const values = [];
   const add = (value) => { if (typeof value === 'string' && /^https?:\/\//i.test(value)) values.push(value); };
   ['highlightsUrl', 'highlightUrl', 'replayUrl', 'replayURL', 'replayPageUrl', 'highlightsVideo'].forEach(key => add(event[key]));
-  if (event.oneballId) add(`${PLAYER_BASE}?one=${encodeURIComponent(`https://sports803.github.io/player/replay/${event.oneballId}`)}`);
   return [...new Set(values)];
 }
 
@@ -408,8 +412,13 @@ function labelsFor(event, key, final = false, limit = MAX_LABELS, hasThumbnail =
   ].filter(Boolean))].filter(label => label !== marker);
   return [marker, ...others.slice(0, Math.max(0, limit - 1))];
 }
-function playerUrlFor(event, streams) {
-  return sports803PlayerUrl((event?.externalSources || []).concat(streams.map(url => ({ url, type: 'mora' }))));
+function playerUrlFor(event, streams, final = isFinal(event)) {
+  const eventSources = (event?.externalSources || []).map(source => {
+    if (source.type !== 'one') return source;
+    const matchId = source.matchId || event.oneballId;
+    return matchId ? { ...source, url: oneBallUrl(matchId, final ? 'replay' : 'live') } : source;
+  });
+  return sports803PlayerUrl(eventSources.concat(streams.map(url => ({ url, type: 'mora' }))));
 }
 
 // ============================================================================
@@ -630,6 +639,47 @@ async function repairMalformedPlayerUrls(token, blogId, posts, sleepFn = sleep) 
       counts.failed++;
       console.error(`repair failed ${listed.id}: ${error.message}`);
       logEvent({ action: 'repair-failed', postId: listed.id, error: error.message });
+    }
+  }
+  return counts;
+}
+function rewriteOneBallReplayIframes(content) {
+  let changed = false;
+  const updatedContent = String(content || '').replace(/<iframe\b[^>]*>/gi, iframe => {
+    return iframe.replace(/(\bsrc\s*=\s*)(["'])(.*?)\2/i, (attribute, prefix, quote, src) => {
+      let playerUrl;
+      try { playerUrl = new URL(src); } catch { return attribute; }
+      if (!/^(?:www\.)?sport803\.online$/i.test(playerUrl.hostname) || playerUrl.pathname.toLowerCase() !== '/p/player.html' || !/oneball\.live/i.test(src)) return attribute;
+      const replaySrc = src
+        .replace(/(https?:\/\/oneball\.live\/)live\//gi, '$1replay/')
+        .replace(/(https?%3A%2F%2Foneball\.live%2F)live%2F/gi, '$1replay%2F');
+      if (replaySrc === src) return attribute;
+      changed = true;
+      return `${prefix}${quote}${replaySrc}${quote}`;
+    });
+  });
+  return { content: updatedContent, changed };
+}
+async function repairOneBallReplayUrls(token, blogId, posts, sleepFn = sleep) {
+  const eventPosts = posts.filter(post => (post.labels || []).some(label => label.startsWith('s803:event:')));
+  const counts = { scanned: 0, updated: 0, skipped: 0, failed: 0 };
+  for (const listed of eventPosts) {
+    counts.scanned++;
+    try {
+      const post = await getPostForRepair(token, blogId, listed.id);
+      const { content, changed } = rewriteOneBallReplayIframes(post.content);
+      if (!changed) { counts.skipped++; continue; }
+      const payload = { kind: 'blogger#post', blog: { id: blogId }, title: post.title || '', content, labels: post.labels || [] };
+      if (post.published) payload.published = post.published;
+      await bloggerWrite(token, blogId, post.id, payload);
+      counts.updated++;
+      console.log(`repaired OneBall replay URL ${post.id}: ${post.title || '(untitled)'}`);
+      logEvent({ action: 'repaired-oneball-replay-url', postId: post.id, title: post.title || '' });
+      await sleepFn(150);
+    } catch (error) {
+      counts.failed++;
+      console.error(`OneBall replay URL repair failed ${listed.id}: ${error.message}`);
+      logEvent({ action: 'oneball-replay-repair-failed', postId: listed.id, error: error.message });
     }
   }
   return counts;
@@ -889,6 +939,14 @@ async function processEvents(events, ctx) {
 
 async function main() {
   const config = loadConfig(); // validates env + timezone before any network call
+  if (process.env.REPAIR_ONEBALL_REPLAY_URLS === '1' || process.env.REPAIR_ONEBALL_REPLAY_URLS === 'true') {
+    const token = await accessToken(config);
+    const posts = await listPosts(token, config.blogId);
+    const counts = await repairOneBallReplayUrls(token, config.blogId, posts);
+    console.log(JSON.stringify({ mode: 'repair-oneball-replay-urls', ...counts }));
+    if (counts.failed > 0) process.exitCode = 1;
+    return;
+  }
   if (process.env.REPAIR_PLAYER_SLASHES === '1' || process.env.REPAIR_PLAYER_SLASHES === 'true') {
     const token = await accessToken(config);
     const posts = await listPosts(token, config.blogId);
@@ -932,7 +990,7 @@ export {
   attachExternalSources, buildFeedIndex, replayLinks, eventKey, markerFor, labelsFor, playerUrlFor,
   dashboardSections, raceSections, previewSections, highlightsSections, playerDataSections, contentHasPlayer, supersportSportFor, fetchSuperSportPage, extractSuperSportVideo, findSuperSportHighlight,
   teamLogoUrl, saveLogoCache, resetLogoCache, logoMarkup, thumbnailSvg, rasterizeThumbnail, uploadImgBb,
-  accessToken, listPosts, getPostBody, getPostForRepair, repairMalformedPlayerUrls, bloggerWrite, processEvents, needsUpdate, parseDashboardEvent, hydrateEventPlayerData, enrichEventsWithPlayerData, fetchLeague, fetchDashboardEvents, fetchRacingFromTSDB, leagueFetchStatus, leagueFetchSource, normalizePlayerBase, normalizePlayerUrlsInHtml
+  accessToken, listPosts, getPostBody, getPostForRepair, repairMalformedPlayerUrls, rewriteOneBallReplayIframes, repairOneBallReplayUrls, bloggerWrite, processEvents, needsUpdate, parseDashboardEvent, hydrateEventPlayerData, enrichEventsWithPlayerData, fetchLeague, fetchDashboardEvents, fetchRacingFromTSDB, leagueFetchStatus, leagueFetchSource, normalizePlayerBase, normalizePlayerUrlsInHtml
 };
 
 const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
