@@ -11,16 +11,16 @@ Every five minutes, the workflow:
 3. Creates one **LIVE** Blogger post per event.
 4. Uses a stable `s803:event:<hash>` label to prevent duplicate posts.
 5. After the event is final, updates that same post with a highlights/replay article and result.
-6. Resolves the matching OneBall live page and August PPV embed feed, then adds them to the Sports 803 player URL using the same `one=` and `embed=` parameters as the Dashboard.
-7. Generates a Dashboard-style logo-based thumbnail and uploads it to ImgBB.
+6. Resolves the matching OneBall live page and adds it to the Sports 803 player URL using the `one=` parameter. PPVtv event links are not scraped or added.
+7. Generates a Dashboard-style logo-based thumbnail, renders it as PNG, and uploads it to ImgBB.
 
 Normal events with a valid scheduled start time dated **today** are eligible. Racing events use the selected date plus or minus one day so multi-day weekends are not missed. Older unrelated events are still ignored. The default date comparison uses `Africa/Nairobi`; set the optional repository variable `EVENT_TIMEZONE` under **Settings → Secrets and variables → Actions → Variables** when another timezone should define “today”.
 
-For a match with a OneBall listing, the generated article contains a player iframe such as `https://www.sport803.online/p/player.html?one=https://oneball.live/live/<match-id>.html`. If August PPV has the same fixture, its `embed=` source is added to that same player URL as a backup/source. The Action uses the stable OneBall match page rather than expiring raw signal URLs.
+For a match with a OneBall listing, the generated article contains a player iframe such as `https://www.sport803.online/p/player.html?one=https://oneball.live/live/<match-id>.html`. The Action uses the stable OneBall match page rather than expiring raw signal URLs; no PPVtv event source is requested or embedded.
 
 Player URLs are normalized before generation and comparison, so the Action uses `player.html?` and never `player.html//?`. To repair existing Blogger posts from the earlier malformed format, run **Actions → Blogger event auto-poster → Run workflow** and enable the `repair_player_slashes` input. That mode scans existing posts, updates only affected iframe bodies, and does not create new posts.
 
-The publisher uses bounded HTTP timeouts and retries for transient feed, logo, ImgBB, OAuth, and Blogger failures. It caches successful team-logo lookups between runs, validates its environment before making network calls, limits Blogger labels to 20, fetches existing post bodies only when a player-link comparison is needed, and reports per-event failures without preventing other events from being processed.
+The publisher uses bounded HTTP timeouts and retries for transient feed, logo, ImgBB, OAuth, and Blogger failures. It caches successful team-logo lookups between runs, validates its environment before making network calls, limits Blogger labels to 20, and marks posts only after a thumbnail upload succeeds. Existing posts without the thumbnail marker are automatically revisited and repaired; when a thumbnail upload fails, the existing post is left untouched and the run reports the failure for a later retry.
 
 ### Racing event discovery
 

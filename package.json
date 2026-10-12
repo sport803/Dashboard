@@ -1,0 +1,10 @@
+{
+  "name": "sports803-dashboard-autoposter",
+  "private": true,
+  "scripts": {
+    "test": "node --test scripts/*.test.mjs"
+  },
+  "dependencies": {
+    "sharp": "0.35.5"
+  }
+}
