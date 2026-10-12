@@ -2,6 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   attachExternalSources,
+  eventDateWindow,
+  fetchLeague,
+  isEligibleForPosting,
+  isTodayOrTomorrow,
   labelsFor,
   markerFor,
   needsUpdate,
@@ -22,6 +26,61 @@ const matchEvent = {
   awayName: 'Chelsea',
   startTime: '2026-10-12T17:00:00Z'
 };
+
+test('the standard posting window includes local today and tomorrow across a year boundary', () => {
+  const oldTimezone = process.env.EVENT_TIMEZONE;
+  const oldEventDate = process.env.EVENT_DATE;
+  const oldLeagues = process.env.AUTO_POST_LEAGUES;
+  const oldLegacyLeagues = process.env.LEAGUES;
+  process.env.EVENT_TIMEZONE = 'Africa/Nairobi';
+  delete process.env.EVENT_DATE;
+  delete process.env.AUTO_POST_LEAGUES;
+  delete process.env.LEAGUES;
+  const now = Date.parse('2026-12-31T21:30:00Z'); // 2027-01-01 00:30 in Nairobi
+  try {
+    assert.deepEqual(eventDateWindow(now), ['2026-12-31', '2027-01-01', '2027-01-02']);
+    assert.equal(isTodayOrTomorrow({ type: 'match', startTime: '2026-12-31T20:59:00Z' }, now), false);
+    assert.equal(isTodayOrTomorrow({ type: 'match', startTime: '2026-12-31T21:30:00Z' }, now), true);
+    assert.equal(isTodayOrTomorrow({ type: 'match', startTime: '2027-01-01T21:00:00Z' }, now), true);
+    assert.equal(isTodayOrTomorrow({ type: 'match', startTime: '2027-01-02T21:00:00Z' }, now), false);
+    assert.equal(isEligibleForPosting({ type: 'match', startTime: '2027-01-01T21:00:00Z' }, now), true);
+    assert.equal(isEligibleForPosting({ type: 'match', startTime: '2027-01-02T21:00:00Z' }, now), false);
+    assert.equal(isEligibleForPosting({ type: 'race', source: 'ESPN', startTime: '2026-12-31T20:59:00Z', league: { id: 'f1', name: 'Formula 1' } }, now), true);
+    assert.equal(isEligibleForPosting({ type: 'race', source: 'other', startTime: '2026-12-31T20:59:00Z', league: { id: 'f1', name: 'Formula 1' } }, now), false);
+  } finally {
+    if (oldTimezone === undefined) delete process.env.EVENT_TIMEZONE; else process.env.EVENT_TIMEZONE = oldTimezone;
+    if (oldEventDate === undefined) delete process.env.EVENT_DATE; else process.env.EVENT_DATE = oldEventDate;
+    if (oldLeagues === undefined) delete process.env.AUTO_POST_LEAGUES; else process.env.AUTO_POST_LEAGUES = oldLeagues;
+    if (oldLegacyLeagues === undefined) delete process.env.LEAGUES; else process.env.LEAGUES = oldLegacyLeagues;
+  }
+});
+
+test('normal league feed results include the target day and tomorrow, not yesterday', async () => {
+  const originalFetch = globalThis.fetch;
+  const requestedDates = [];
+  globalThis.fetch = async input => {
+    const date = new URL(input).searchParams.get('dates');
+    requestedDates.push(date);
+    const isoDate = `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}`;
+    return Response.json({ events: [{
+      id: `event-${date}`,
+      date: `${isoDate}T12:00:00Z`,
+      status: { type: { description: 'Scheduled' } },
+      competitions: [{ competitors: [
+        { homeAway: 'home', team: { displayName: 'Home' } },
+        { homeAway: 'away', team: { displayName: 'Away' } }
+      ] }]
+    }] });
+  };
+  try {
+    const dates = ['2026-10-11', '2026-10-12', '2026-10-13'];
+    const events = await fetchLeague({ id: 'fixture', sport: 'soccer', slug: 'fixture-league', name: 'Fixture League', type: 'match' }, dates);
+    assert.deepEqual(requestedDates.sort(), ['20261011', '20261012', '20261013']);
+    assert.deepEqual(events.map(event => event.id), ['event-20261012', 'event-20261013']);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 
 test('OneBall is the only scraped external event link, even when legacy PPV feeds are passed in', async () => {
   const [event] = await attachExternalSources([matchEvent], {
