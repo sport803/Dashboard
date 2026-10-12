@@ -318,7 +318,10 @@ function pairMatch(event, home, away) {
 // EXTERNAL STREAM SOURCES (OneBall only)
 // ============================================================================
 
-function oneBallUrl(matchId) { return `https://oneball.live/live/${encodeURIComponent(String(matchId).replace(/\.html?$/i, ''))}.html`; }
+function oneBallUrl(matchId, mode = 'live') {
+  const route = mode === 'replay' ? 'replay' : 'live';
+  return `https://oneball.live/${route}/${encodeURIComponent(String(matchId).replace(/\.html?$/i, ''))}.html`;
+}
 function normalizePlayerUrlsInHtml(html) {
   return String(html || '').replace(/((?:https?:\/\/)[^"'<>\s]+\/player\.html)\/+\?/gi, '$1?');
 }
@@ -379,10 +382,11 @@ async function attachExternalSources(events, feeds) {
   });
 }
 function replayLinks(event) {
+  // A OneBall-backed highlights post must use its replay page, not its live page or an unrelated fallback.
+  if (event.oneballId) return [`${PLAYER_BASE}?one=${oneBallUrl(event.oneballId, 'replay')}`];
   const values = [];
   const add = (value) => { if (typeof value === 'string' && /^https?:\/\//i.test(value)) values.push(value); };
   ['highlightsUrl', 'highlightUrl', 'replayUrl', 'replayURL', 'replayPageUrl', 'highlightsVideo'].forEach(key => add(event[key]));
-  if (event.oneballId) add(`${PLAYER_BASE}?one=${encodeURIComponent(`https://sports803.github.io/player/replay/${event.oneballId}`)}`);
   return [...new Set(values)];
 }
 
@@ -408,8 +412,13 @@ function labelsFor(event, key, final = false, limit = MAX_LABELS, hasThumbnail =
   ].filter(Boolean))].filter(label => label !== marker);
   return [marker, ...others.slice(0, Math.max(0, limit - 1))];
 }
-function playerUrlFor(event, streams) {
-  return sports803PlayerUrl((event?.externalSources || []).concat(streams.map(url => ({ url, type: 'mora' }))));
+function playerUrlFor(event, streams, final = isFinal(event)) {
+  const eventSources = (event?.externalSources || []).map(source => {
+    if (source.type !== 'one') return source;
+    const matchId = source.matchId || event.oneballId;
+    return matchId ? { ...source, url: oneBallUrl(matchId, final ? 'replay' : 'live') } : source;
+  });
+  return sports803PlayerUrl(eventSources.concat(streams.map(url => ({ url, type: 'mora' }))));
 }
 
 // ============================================================================

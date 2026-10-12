@@ -6,6 +6,7 @@ import {
   markerFor,
   needsUpdate,
   playerUrlFor,
+  replayLinks,
   rasterizeThumbnail,
   uploadImgBb
 } from './blogger-auto-poster.mjs';
@@ -31,6 +32,16 @@ test('OneBall is the only scraped external event link, even when legacy PPV feed
   const player = playerUrlFor(event, []);
   assert.match(player, /oneball\.live\/live\/ob-77\.html/);
   assert.doesNotMatch(player, /ppvtv|embed=/i);
+});
+
+test('OneBall replays use the replay path while live posts keep the live path', async () => {
+  const feeds = { oneball: [{ id: '4578214', home: 'Arsenal', away: 'Chelsea' }] };
+  const [liveEvent] = await attachExternalSources([matchEvent], feeds);
+  const [finalEvent] = await attachExternalSources([{ ...matchEvent, status: 'Final', replayUrl: 'https://example.test/old-replay' }], feeds);
+
+  assert.equal(playerUrlFor(liveEvent, []), 'https://www.sport803.online/p/player.html?one=https://oneball.live/live/4578214.html');
+  assert.equal(playerUrlFor(finalEvent, []), 'https://www.sport803.online/p/player.html?one=https://oneball.live/replay/4578214.html');
+  assert.deepEqual(replayLinks(finalEvent), ['https://www.sport803.online/p/player.html?one=https://oneball.live/replay/4578214.html']);
 });
 
 test('successful thumbnail uploads are labelled within Blogger limits', () => {
