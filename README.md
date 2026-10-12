@@ -14,7 +14,7 @@ Every five minutes, the workflow:
 6. Resolves the matching OneBall live page and adds it to the Sports 803 player URL using the `one=` parameter. PPVtv event links are not scraped or added.
 7. Generates a Dashboard-style logo-based thumbnail, renders it as PNG, and uploads it to ImgBB.
 
-Normal events with a valid scheduled start time dated **today** are eligible. Racing events use the selected date plus or minus one day so multi-day weekends are not missed. Older unrelated events are still ignored. The default date comparison uses `Africa/Nairobi`; set the optional repository variable `EVENT_TIMEZONE` under **Settings → Secrets and variables → Actions → Variables** when another timezone should define “today”.
+Normal events with a valid scheduled start time dated **today or tomorrow** are eligible. ESPN fetches the previous day, today, and tomorrow, then keeps today and tomorrow for normal leagues. Racing events retain the selected date plus-or-minus-one-day window so multi-day weekends are not missed. Older unrelated events are still ignored. The default date comparison uses `Africa/Nairobi`; set the optional repository variable `EVENT_TIMEZONE` under **Settings → Secrets and variables → Actions → Variables** when another timezone should define the posting window.
 
 For a live match with a OneBall listing, the generated article contains a player iframe such as `https://www.sport803.online/p/player.html?one=https://oneball.live/live/<match-id>.html`. When the article becomes a replay/highlights post, the iframe switches to `https://www.sport803.online/p/player.html?one=https://oneball.live/replay/<match-id>.html` (only the OneBall path changes from `live` to `replay`). No PPVtv event source is requested or embedded.
 
@@ -58,7 +58,7 @@ Optional Actions variable:
 
 | Variable | Purpose |
 |---|---|
-| `EVENT_TIMEZONE` | IANA timezone used for the ESPN date query and today filter; defaults to `Africa/Nairobi` |
+| `EVENT_TIMEZONE` | IANA timezone used for the ESPN date query and today/tomorrow filter; defaults to `Africa/Nairobi` |
 | `AUTO_POST_LEAGUES` | Comma-separated league IDs/names to publish; blank means all eligible leagues |
 
 ### Choosing leagues

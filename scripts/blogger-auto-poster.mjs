@@ -235,6 +235,12 @@ function localDate(value, timeZone) {
   if (!Number.isFinite(date.getTime())) return null;
   return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
 }
+function shiftCalendarDate(dateText, offset) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateText || ''));
+  if (!match) return null;
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]) + offset));
+  return date.toISOString().slice(0, 10);
+}
 function isToday(event, now = Date.now()) {
   const scheduled = startTime(event);
   if (!scheduled) return false;
@@ -242,6 +248,19 @@ function isToday(event, now = Date.now()) {
   const eventDate = localDate(scheduled, timeZone);
   const today = localDate(now, timeZone);
   return Boolean(eventDate && today && eventDate === today);
+}
+function isTodayOrTomorrow(event, now = Date.now()) {
+  const scheduled = startTime(event);
+  if (!scheduled) return false;
+  const timeZone = eventTimeZone();
+  const eventDate = localDate(scheduled, timeZone);
+  const today = localDate(now, timeZone);
+  const tomorrow = shiftCalendarDate(today, 1);
+  return Boolean(eventDate && today && (eventDate === today || eventDate === tomorrow));
+}
+function isEligibleForPosting(event, now = Date.now()) {
+  const raceFromSupportedSource = event?.type === 'race' && (event.source === 'ESPN' || event.source === 'TheSportsDB');
+  return !isDead(event) && (isTodayOrTomorrow(event, now) || raceFromSupportedSource) && matchesConfiguredLeague(event);
 }
 function streamLinks(event) {
   const values = [];
@@ -706,16 +725,17 @@ async function bloggerWrite(token, blogId, postId, payload) {
 // ESPN DISCOVERY
 // ============================================================================
 
-function dashboardDate(timeZone) {
-  const parts = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+function dashboardDate(timeZone, now = Date.now()) {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(now));
   const values = Object.fromEntries(parts.filter(part => part.type !== 'literal').map(part => [part.type, part.value]));
   return `${values.year}${values.month}${values.day}`;
 }
-function eventDateWindow() {
+function eventDateWindow(now = Date.now()) {
   const raw = process.env.EVENT_DATE;
   const normalized = raw && /^\d{8}$/.test(raw) ? `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}` : raw;
-  const anchor = normalized ? new Date(`${normalized}T12:00:00`) : new Date(`${dashboardDate(eventTimeZone()).slice(0, 4)}-${dashboardDate(eventTimeZone()).slice(4, 6)}-${dashboardDate(eventTimeZone()).slice(6, 8)}T12:00:00`);
-  return [-1, 0, 1].map(offset => { const date = new Date(anchor); date.setDate(date.getDate() + offset); return date.toISOString().slice(0, 10); });
+  const today = dashboardDate(eventTimeZone(), now);
+  const anchor = normalized || `${today.slice(0, 4)}-${today.slice(4, 6)}-${today.slice(6, 8)}`;
+  return [-1, 0, 1].map(offset => shiftCalendarDate(anchor, offset));
 }
 function dedupeEvents(events) {
   const seen = new Set();
@@ -807,7 +827,7 @@ async function enrichEventsWithPlayerData(events) {
 }
 // v11: every broken source is logged; empty 200 responses remain valid empty leagues.
 async function fetchLeague(league, dates = eventDateWindow()) {
-  const anchorDate = dates[1];
+  const eligibleMatchDates = new Set(dates.slice(1));
   if (league.type === 'race' && !ESPN_RACING_SUPPORTED.has(league.id)) {
     try { const events = await fetchRacingFromTSDB(league, dates); setLeagueFetchResult(league, events.length ? 'ok' : 'empty', 'TheSportsDB'); return events; }
     catch (error) { setLeagueFetchResult(league, 'error', 'TheSportsDB'); throw new Error(`${league.name} TheSportsDB failed: ${error.message}`); }
@@ -824,7 +844,7 @@ async function fetchLeague(league, dates = eventDateWindow()) {
         else hadEmpty = true;
       } catch (error) { lastError = error; console.warn(`[ESPN] ${league.name} (${slug}, ${date}): ${error.message}`); }
     }
-    const parsed = dedupeEvents(collected.filter(item => league.type === 'race' || item.date === anchorDate).map(item => parseDashboardEvent(item.event, league)));
+    const parsed = dedupeEvents(collected.filter(item => league.type === 'race' || eligibleMatchDates.has(item.date)).map(item => parseDashboardEvent(item.event, league)));
     if (parsed.length) { setLeagueFetchResult(league, 'ok', 'ESPN'); return parsed; }
   }
   if (league.type === 'race') {
@@ -852,7 +872,7 @@ function logEvent(entry) { console.log(JSON.stringify(entry)); }
 /**
  * Decide whether an existing post needs rewriting. Labels alone settle the "now final" case; the
  * "player URL changed/missing" case needs the body, which we fetch lazily (one GET) and only for
- * posts of today's events that have a player URL to compare against.
+ * posts of eligible today/tomorrow events that have a player URL to compare against.
  */
 function contentHasPlayerData(content) {
   const body = String(content || '').toLowerCase();
@@ -958,7 +978,7 @@ async function main() {
   const allEvents = await attachExternalSources(await fetchDashboardEvents());
   await enrichEventsWithPlayerData(allEvents);
   // Dashboard cards are valid events before an external stream is resolved.
-  const events = allEvents.filter(event => !isDead(event) && (isToday(event) || (event.type === 'race' && (event.source === 'ESPN' || event.source === 'TheSportsDB'))) && matchesConfiguredLeague(event));
+  const events = allEvents.filter(event => isEligibleForPosting(event));
 
   if (config.dryRun) {
     let sampleThumbnail = '', failed = 0;
@@ -986,7 +1006,7 @@ export {
   DASHBOARD_LEAGUES, LEAGUE_ALIASES, SPORT_LABELS, MAX_LABELS,
   loadConfig, withRetry, isRetryable, HttpError, getJson,
   text, pick, htmlEscape, stableHash, isFinal, isDead, eventName, eventScore, leagueName, leagueId, canonicalLeague, isRace,
-  localDate, isToday, streamLinks, teamKey, teamsMatch, pairMatch,
+  localDate, isToday, isTodayOrTomorrow, isEligibleForPosting, eventDateWindow, streamLinks, teamKey, teamsMatch, pairMatch,
   attachExternalSources, buildFeedIndex, replayLinks, eventKey, markerFor, labelsFor, playerUrlFor,
   dashboardSections, raceSections, previewSections, highlightsSections, playerDataSections, contentHasPlayer, supersportSportFor, fetchSuperSportPage, extractSuperSportVideo, findSuperSportHighlight,
   teamLogoUrl, saveLogoCache, resetLogoCache, logoMarkup, thumbnailSvg, rasterizeThumbnail, uploadImgBb,
