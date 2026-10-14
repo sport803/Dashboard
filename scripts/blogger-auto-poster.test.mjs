@@ -56,6 +56,22 @@ test('the standard posting window includes local today and tomorrow across a yea
   }
 });
 
+test('date-only mode filters out tomorrow when explicitly requested', () => {
+  const oldDate = process.env.EVENT_DATE, oldDateOnly = process.env.EVENT_DATE_ONLY, oldTimezone = process.env.EVENT_TIMEZONE;
+  process.env.EVENT_DATE = '2026-10-14';
+  process.env.EVENT_DATE_ONLY = 'true';
+  process.env.EVENT_TIMEZONE = 'Africa/Nairobi';
+  try {
+    const now = Date.parse('2026-10-14T10:00:00Z');
+    assert.equal(isEligibleForPosting({ type: 'match', startTime: '2026-10-14T17:00:00Z' }, now), true);
+    assert.equal(isEligibleForPosting({ type: 'match', startTime: '2026-10-15T17:00:00Z' }, now), false);
+  } finally {
+    if (oldDate === undefined) delete process.env.EVENT_DATE; else process.env.EVENT_DATE = oldDate;
+    if (oldDateOnly === undefined) delete process.env.EVENT_DATE_ONLY; else process.env.EVENT_DATE_ONLY = oldDateOnly;
+    if (oldTimezone === undefined) delete process.env.EVENT_TIMEZONE; else process.env.EVENT_TIMEZONE = oldTimezone;
+  }
+});
+
 test('normal league feed results include the target day and tomorrow, not yesterday', async () => {
   const originalFetch = globalThis.fetch;
   const requestedDates = [];
@@ -108,6 +124,14 @@ test('Xoilac homepage match links are normalized and paired with OneBall in the 
   });
   assert.equal(playerUrlFor(paired, []), 'https://www.sport803.online/p/player.html?one=https://oneball.live/live/4628431.html&xoilac=https://xoilaczzz.pro/truc-tiep/feyenoord-vs-como-luc-2345-ngay-14-10-2026/');
   assert.equal(playerUrlFor({ ...paired, status: 'Final' }, []), 'https://www.sport803.online/p/player.html?one=https://oneball.live/replay/4628431.html&xoilac=https://xoilaczzz.pro/truc-tiep/feyenoord-vs-como-luc-2345-ngay-14-10-2026/');
+});
+
+test('Xoilac U19 pages are not attached to senior fixtures', async () => {
+  const [event] = await attachExternalSources([{ ...matchEvent, homeName: 'Shakhtar Donetsk', awayName: 'AEK Athens' }], {
+    oneball: [{ id: '1', home: 'Shakhtar Donetsk', away: 'AEK Athens' }],
+    xoilac: [{ url: 'https://xoilaczzz.pro/truc-tiep/shakhtar-donetsk-u19-vs-aek-athens-u19-luc-1800/', home: 'Shakhtar Donetsk U19', away: 'AEK Athens U19' }]
+  });
+  assert.deepEqual(event.externalSources.map(source => source.type), ['one']);
 });
 
 test('OneBall replays use the replay path while live posts keep the live path', async () => {

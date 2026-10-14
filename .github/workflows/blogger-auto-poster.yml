@@ -3,6 +3,21 @@ name: Blogger event auto-poster
 on:
   workflow_dispatch:
     inputs:
+      league_filter:
+        description: 'Limit this manual run to a league ID such as ucl (blank uses the repository default)'
+        required: false
+        default: ''
+        type: string
+      event_date:
+        description: 'Optional date to fetch (YYYY-MM-DD); blank uses today in EVENT_TIMEZONE'
+        required: false
+        default: ''
+        type: string
+      event_date_only:
+        description: 'When a date is supplied, publish only matches on that local date'
+        required: false
+        default: false
+        type: boolean
       repair_player_slashes:
         description: 'Repair existing Blogger iframe URLs containing player.html//?'
         required: false
@@ -66,7 +81,9 @@ jobs:
           BLOGGER_REFRESH_TOKEN: ${{ secrets.BLOGGER_REFRESH_TOKEN }}
           IMGBB_API_KEY: ${{ secrets.IMGBB_API_KEY }}
           EVENT_TIMEZONE: ${{ vars.EVENT_TIMEZONE }}
-          AUTO_POST_LEAGUES: ${{ vars.AUTO_POST_LEAGUES }}
+          AUTO_POST_LEAGUES: ${{ inputs.league_filter || vars.AUTO_POST_LEAGUES }}
+          EVENT_DATE: ${{ inputs.event_date }}
+          EVENT_DATE_ONLY: ${{ inputs.event_date_only }}
           ENRICH_PLAYER_DATA: ${{ vars.ENRICH_PLAYER_DATA }}
           SUPERSPORT_HIGHLIGHTS: ${{ vars.SUPERSPORT_HIGHLIGHTS }}
           PLAYER_BASE_URL: https://www.sport803.online/p/player.html

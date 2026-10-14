@@ -262,7 +262,12 @@ function isTodayOrTomorrow(event, now = Date.now()) {
 }
 function isEligibleForPosting(event, now = Date.now()) {
   const raceFromSupportedSource = event?.type === 'race' && (event.source === 'ESPN' || event.source === 'TheSportsDB');
-  return !isDead(event) && (isTodayOrTomorrow(event, now) || raceFromSupportedSource) && matchesConfiguredLeague(event);
+  const dateOnly = /^(1|true|yes)$/i.test(text(process.env.EVENT_DATE_ONLY));
+  let targetDate = text(process.env.EVENT_DATE);
+  if (/^\d{8}$/.test(targetDate)) targetDate = `${targetDate.slice(0, 4)}-${targetDate.slice(4, 6)}-${targetDate.slice(6, 8)}`;
+  if (!targetDate) targetDate = localDate(now, eventTimeZone());
+  const inDateWindow = dateOnly ? localDate(startTime(event), eventTimeZone()) === targetDate : isTodayOrTomorrow(event, now);
+  return !isDead(event) && (inDateWindow || raceFromSupportedSource) && matchesConfiguredLeague(event);
 }
 function streamLinks(event) {
   const values = [];
@@ -333,6 +338,12 @@ function teamsMatch(left, right) {
 }
 function pairMatch(event, home, away) {
   return (teamsMatch(homeName(event), home) && teamsMatch(awayName(event), away)) || (teamsMatch(homeName(event), away) && teamsMatch(awayName(event), home));
+}
+function squadQualifier(value) { return teamKey(value).match(/\b(u\d{2}|women|ladies|female|reserves?|youth|b team)\b/i)?.[1]?.toLowerCase() || ''; }
+function xoilacPairMatch(event, entry) {
+  const sameSquads = (left, right) => squadQualifier(left) === squadQualifier(right);
+  return (teamsMatch(homeName(event), entry.home) && teamsMatch(awayName(event), entry.away) && sameSquads(homeName(event), entry.home) && sameSquads(awayName(event), entry.away)) ||
+    (teamsMatch(homeName(event), entry.away) && teamsMatch(awayName(event), entry.home) && sameSquads(homeName(event), entry.away) && sameSquads(awayName(event), entry.home));
 }
 
 // ============================================================================
@@ -431,7 +442,9 @@ async function attachExternalSources(events, feeds) {
     if (event.type !== 'match') return { ...event, externalSources: [] };
     const sources = [];
     const one = findFeedMatch(oneIndex, oneball, event);
-    const xoilacMatch = findFeedMatch(xoilacIndex, xoilac, event);
+    const xoilacMatch = xoilacIndex.get(`${teamKey(homeName(event))}|${teamKey(awayName(event))}`) && xoilacPairMatch(event, xoilacIndex.get(`${teamKey(homeName(event))}|${teamKey(awayName(event))}`))
+      ? xoilacIndex.get(`${teamKey(homeName(event))}|${teamKey(awayName(event))}`)
+      : xoilac.find(entry => xoilacPairMatch(event, entry));
     if (one) sources.push({ url: oneBallUrl(one.id), type: 'one', source: 'onetv', matchId: String(one.id), home: one.home, away: one.away });
     if (xoilacMatch) sources.push({ url: xoilacMatch.url, type: 'xoilac', source: 'xoilac', home: xoilacMatch.home, away: xoilacMatch.away });
     // oneballId is populated here (instead of deleting the branch in replayLinks) so the replay URL feature keeps working.
