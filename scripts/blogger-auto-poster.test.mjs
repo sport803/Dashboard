@@ -9,6 +9,7 @@ import {
   labelsFor,
   markerFor,
   needsUpdate,
+  forceUpdateEnabled,
   playerUrlFor,
   playerIframe,
   hasEscapedPlayerQuerySeparator,
@@ -169,6 +170,20 @@ test('successful thumbnail uploads are labelled within Blogger limits', () => {
   assert.ok(!normalLabels.includes('s803:thumbnail'));
   assert.ok(imageLabels.includes(markerFor('epl|espn-123')));
   assert.ok(imageLabels.length <= 20);
+});
+
+test('force-update workflow option is opt-in and recognizes true values', () => {
+  const old = process.env.FORCE_UPDATE;
+  try {
+    delete process.env.FORCE_UPDATE;
+    assert.equal(forceUpdateEnabled(), false);
+    process.env.FORCE_UPDATE = 'true';
+    assert.equal(forceUpdateEnabled(), true);
+    process.env.FORCE_UPDATE = '0';
+    assert.equal(forceUpdateEnabled(), false);
+  } finally {
+    if (old === undefined) delete process.env.FORCE_UPDATE; else process.env.FORCE_UPDATE = old;
+  }
 });
 
 test('player iframe sources keep literal ampersands and escaped source posts are repaired', async () => {

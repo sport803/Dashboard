@@ -949,6 +949,8 @@ async function needsUpdate(existing, { event, final, desiredPlayer }, ctx) {
   return !contentHasPlayer(existing.content, desiredPlayer);
 }
 
+function forceUpdateEnabled() { return /^(1|true|yes)$/i.test(text(process.env.FORCE_UPDATE)); }
+
 async function processEvents(events, ctx) {
   const { token, blogId, byMarker, imgbbKey, sleepFn = sleep } = ctx;
   const counts = { created: 0, updated: 0, skipped: 0, failed: 0 };
@@ -965,7 +967,7 @@ async function processEvents(events, ctx) {
       const label = isRace(event) ? eventName(event) : displayEventName(event);
       title = isRace(event) ? (final ? `${label} – Full Race Replay | Sports 803` : `${label} – Race Preview & Live Stream | Sports 803`) : (final ? `${label} – Highlights & Replay | Sports 803` : `${label} – ${leagueName(event)} Live Stream | Sports 803`);
       const desiredPlayer = superSport?.playerUrl || playerUrlFor(event, streams);
-      const shouldUpdate = existing ? await needsUpdate(existing, { event, final, desiredPlayer }, ctx) : false;
+      const shouldUpdate = existing ? (forceUpdateEnabled() || await needsUpdate(existing, { event, final, desiredPlayer }, ctx)) : false;
       if (existing && !shouldUpdate) {
         counts.skipped++;
         console.log(`skipped ${existing.id}: ${title}`);
@@ -1065,7 +1067,7 @@ export {
   attachExternalSources, buildFeedIndex, parseXoilacLinks, replayLinks, eventKey, markerFor, labelsFor, playerUrlFor,
   dashboardSections, raceSections, previewSections, highlightsSections, playerDataSections, playerIframe, contentHasPlayer, hasEscapedPlayerQuerySeparator, supersportSportFor, fetchSuperSportPage, extractSuperSportVideo, findSuperSportHighlight,
   teamLogoUrl, saveLogoCache, resetLogoCache, logoMarkup, thumbnailSvg, rasterizeThumbnail, uploadImgBb,
-  accessToken, listPosts, getPostBody, getPostForRepair, repairMalformedPlayerUrls, rewriteOneBallReplayIframes, repairOneBallReplayUrls, bloggerWrite, processEvents, needsUpdate, parseDashboardEvent, hydrateEventPlayerData, enrichEventsWithPlayerData, fetchLeague, fetchDashboardEvents, fetchRacingFromTSDB, leagueFetchStatus, leagueFetchSource, normalizePlayerBase, normalizePlayerUrlsInHtml
+  accessToken, listPosts, getPostBody, getPostForRepair, repairMalformedPlayerUrls, rewriteOneBallReplayIframes, repairOneBallReplayUrls, bloggerWrite, processEvents, needsUpdate, forceUpdateEnabled, parseDashboardEvent, hydrateEventPlayerData, enrichEventsWithPlayerData, fetchLeague, fetchDashboardEvents, fetchRacingFromTSDB, leagueFetchStatus, leagueFetchSource, normalizePlayerBase, normalizePlayerUrlsInHtml
 };
 
 const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;

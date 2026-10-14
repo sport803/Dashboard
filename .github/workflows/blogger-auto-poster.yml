@@ -3,6 +3,11 @@ name: Blogger event auto-poster
 on:
   workflow_dispatch:
     inputs:
+      force_update:
+        description: 'Rewrite all eligible existing event posts even if they already match'
+        required: false
+        default: false
+        type: boolean
       league_filter:
         description: 'Limit this manual run to a league ID such as ucl (blank uses the repository default)'
         required: false
@@ -84,6 +89,7 @@ jobs:
           AUTO_POST_LEAGUES: ${{ inputs.league_filter || vars.AUTO_POST_LEAGUES }}
           EVENT_DATE: ${{ inputs.event_date }}
           EVENT_DATE_ONLY: ${{ inputs.event_date_only }}
+          FORCE_UPDATE: ${{ inputs.force_update }}
           ENRICH_PLAYER_DATA: ${{ vars.ENRICH_PLAYER_DATA }}
           SUPERSPORT_HIGHLIGHTS: ${{ vars.SUPERSPORT_HIGHLIGHTS }}
           PLAYER_BASE_URL: https://www.sport803.online/p/player.html
