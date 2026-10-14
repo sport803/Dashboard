@@ -17,7 +17,9 @@ import {
   replayLinks,
   rewriteOneBallReplayIframes,
   rasterizeThumbnail,
-  uploadImgBb
+  uploadImgBb,
+  parseLiveTVArchive,
+  extractLiveTVIframe
 } from './blogger-auto-poster.mjs';
 
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -225,4 +227,18 @@ test('ImgBB receives PNG data rather than the source SVG text', async () => {
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+
+test('LiveTV archive matching translates Russian team names and skips hidden clips', () => {
+  const html = '<div style="display:none"><b>ЛАСК &ndash; Ливерпуль</b><a href="/showvideo/1_hidden/"><img></a><a href="/showvideo/1_hidden/">Обзор матча</a></div>' +
+    '<b>ЛАСК &ndash; Ливерпуль</b><span>full replay</span><a href="/showvideo/1598146_lask_liverpul/"><img></a><a href="/showvideo/1598146_lask_liverpul/">Обзор матча</a>';
+  const found = parseLiveTVArchive(html, { homeName: 'Liverpool', awayName: 'LASK' }, 'https://livetv.sx/video/20261014/');
+  assert.equal(found.matchId, '1598146');
+  assert.equal(found.showUrl, 'https://livetv.sx/showvideo/1598146_lask_liverpul/');
+});
+
+test('LiveTV iframe extraction prefers the permitted player and skips ad frames', () => {
+  const html = '<iframe src="//ads.livetv.example/ad.html"></iframe><iframe src="//emb.apl621.online/player/video.php?id=350296&amp;s=25b2w33u&amp;w=590&amp;h=384"></iframe>';
+  assert.equal(extractLiveTVIframe(html), 'https://emb.apl621.online/player/video.php?id=350296&s=25b2w33u&w=590&h=384');
 });

@@ -92,6 +92,7 @@ jobs:
           FORCE_UPDATE: ${{ inputs.force_update }}
           ENRICH_PLAYER_DATA: ${{ vars.ENRICH_PLAYER_DATA }}
           SUPERSPORT_HIGHLIGHTS: ${{ vars.SUPERSPORT_HIGHLIGHTS }}
+          LIVETV_HIGHLIGHTS: ${{ vars.LIVETV_HIGHLIGHTS }}
           PLAYER_BASE_URL: https://www.sport803.online/p/player.html
           XOILAC_HOME_URL: https://xoilaczzz.pro/
           REPAIR_PLAYER_SLASHES: ${{ inputs.repair_player_slashes }}

@@ -302,6 +302,18 @@ function extractSuperSportVideo(html, pageUrl) {
   return { title: title || 'SuperSport Highlights', source: hls ? 'm3u8' : 'youtube', sourceUrl, thumbnail, pageUrl };
 }
 // v13: Match one recent SuperSport listing item and fetch only its video page.
+// v14: LiveTV.sx replay fallback. RU archive names are translated before pair matching.
+const LIVETV_BASE = 'https://livetv.sx', LIVETV_ARCHIVE = `${LIVETV_BASE}/video/`;
+const livetvArchiveCache = new Map(), livetvShowCache = new Map();
+const LIVETV_RU_EN = new Map(`Ливерпуль|Liverpool;ЛАСК|LASK;Манчестер Сити|Manchester City;Манчестер Юн|Manchester United;Арсенал|Arsenal;Челси|Chelsea;Тоттенхэм|Tottenham Hotspur;Ньюкасл|Newcastle United;Барселона|Barcelona;Реал Мадрид|Real Madrid;Атлетико Мадрид|Atletico Madrid;Ювентус|Juventus;Интер|Inter Milan;Милан|AC Milan;Наполи|Napoli;Рома|Roma;Лацио|Lazio;Бавария|Bayern Munich;Боруссия Д|Borussia Dortmund;РБ Лейпциг|RB Leipzig;ПСЖ|Paris Saint-Germain;Марсель|Marseille;Лион|Lyon;Монако|Monaco;Порту|Porto;Бенфика|Benfica;Аякс|Ajax;ПСВ|PSV Eindhoven;Фейеноорд|Feyenoord;Шахтер|Shakhtar Donetsk;Динамо Киев|Dynamo Kyiv;Селтик|Celtic;Рейнджерс|Rangers;Мексика|Mexico;США|United States;Канада|Canada;Бразилия|Brazil;Аргентина|Argentina;Уругвай|Uruguay;Колумбия|Colombia;Чили|Chile;Англия|England;Франция|France;Германия|Germany;Испания|Spain;Италия|Italy;Португалия|Portugal;Нидерланды|Netherlands;Бельгия|Belgium;Хорватия|Croatia;Сербия|Serbia;Швейцария|Switzerland;Австрия|Austria;Дания|Denmark;Швеция|Sweden;Норвегия|Norway;Польша|Poland;Чехия|Czech Republic;Румыния|Romania;Греция|Greece;Турция|Turkey;Украина|Ukraine;Марокко|Morocco;Египет|Egypt;Нигерия|Nigeria;Гана|Ghana;Сенегал|Senegal;Япония|Japan;Южная Корея|South Korea;Лидс|Leeds United;Сандерленд|Sunderland;Брентфорд|Brentford;Лестер|Leicester City;Ковентри|Coventry City;Саутгемптон|Southampton;Уотфорд|Watford;Норвич|Norwich City;Вест Бромвич|West Bromwich Albion;Халл|Hull City;Борнмут|Bournemouth;Реал Мальорка|Mallorca;Хетафе|Getafe;Осасуна|Osasuna;Сельта|Celta Vigo;Райо Вальекано|Rayo Vallecano;Альмерия|Almeria;Кадис|Cadiz;Гранада|Granada;Лас-Пальмас|Las Palmas;Эмполи|Empoli;Дженоа|Genoa;Монца|Monza;Верона|Hellas Verona;Сампдория|Sampdoria;Сассуоло|Sassuolo;Боруссия Менхенгладбах|Borussia Monchengladbach;Айнтрахт|Eintracht Frankfurt;Вольфсбург|Wolfsburg;Фрайбург|Freiburg;Майнц|Mainz;Вердер|Werder Bremen;Унион Берлин|Union Berlin;Гамбург|Hamburg;Ницца|Nice;Ренн|Rennes;Ланс|Lens;Нант|Nantes;Монпелье|Montpellier;Тулуза|Toulouse;Страсбург|Strasbourg;Брест|Brest;Генк|Genk;Брюгге|Club Brugge;Андерлехт|Anderlecht;Базель|Basel;Лугано|Lugano;ПАОК|PAOK;Брага|Braga;Витория Гимарайнш|Vitoria Guimaraes;Ривер Плейт|River Plate;Бока Хуниорс|Boca Juniors;Фламенго|Flamengo;Палмейрас|Palmeiras;Сантос|Santos;Коринтианс|Corinthians;Атлетико Минейро|Atletico Mineiro;Расинг|Racing Club;Насьональ|Nacional;Олимпия|Olimpia;Коста-Рика|Costa Rica;Панама|Panama;Гондурас|Honduras;Ямайка|Jamaica;Эквадор|Ecuador;Боливия|Bolivia;Венесуэла|Venezuela;Парагвай|Paraguay;Южная Африка|South Africa;Кот-д’Ивуар|Ivory Coast;ДР Конго|DR Congo;Гвинея|Guinea;Мали|Mali;Буркина-Фасо|Burkina Faso;Замбия|Zambia;Кения|Kenya;Танзания|Tanzania;Китай|China;Узбекистан|Uzbekistan;Ирак|Iraq;ОАЭ|United Arab Emirates;Катар|Qatar;Израиль|Israel;Исландия|Iceland;Словения|Slovenia;Словакия|Slovakia;Албания|Albania;Босния и Герцеговина|Bosnia and Herzegovina;Черногория|Montenegro;Северная Македония|North Macedonia;Косово|Kosovo;Грузия|Georgia;Армения|Armenia;Азербайджан|Azerbaijan`.split(';').map(pair => pair.split('|')));
+const livetvTranslate = value => { const raw = text(value), found = [...LIVETV_RU_EN].find(([ru]) => ru.toLowerCase() === raw.toLowerCase()); return found ? found[1] : raw; };
+const livetvPair = (a, b) => [teamKey(livetvTranslate(a)), teamKey(livetvTranslate(b))].sort().join('|');
+const livetvProxyFetch = async (url, cache, ttl) => { const cached = cache.get(url); if (cached && Date.now() - cached.ts < ttl) return cached.html; const proxies = [u => `https://r.jina.ai/http://${u.replace(/^https?:\/\//i, '')}`, u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`, u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`, u => `https://corsproxy.io/?url=${encodeURIComponent(u)}`]; for (const proxy of proxies) try { const response = await fetch(proxy(url), { headers: { 'X-Return-Format': 'html', 'user-agent': USER_AGENT }, signal: timeoutSignal() }); if (response.ok) { const html = await response.text(); if (html.length > 800) { cache.set(url, { ts: Date.now(), html }); return html; } } } catch (error) { console.warn(`[LiveTV] proxy failed: ${error.message}`); } return ''; };
+function parseLiveTVArchive(html, event, archiveUrl) { const visible = String(html || '').replace(/<div\b[^>]*style\s*=\s*["'][^"']*display\s*:\s*none[^"']*["'][^>]*>[\s\S]*?<\/div>/gi, ''); const re = /<b>\s*([^<]+?)\s*(?:&ndash;|–|-)\s*([^<]+?)\s*<\/b>([\s\S]{0,600}?<a\b[^>]*href=["']([^"']*\/showvideo\/(\d+)[^"']*)["'][\s\S]*?<a\b[^>]*>\s*(?:Обзор матча|Подробный обзор матча)\s*<\/a>)/gi; let match; while ((match = re.exec(visible))) { if (livetvPair(homeName(event), awayName(event)) === livetvPair(match[1], match[2])) return { home: match[1].trim(), away: match[2].trim(), matchId: match[5], archiveUrl, showUrl: new URL(match[4], LIVETV_BASE).href }; } return null; }
+function extractLiveTVIframe(html) { const re = /<iframe\b[^>]*\bsrc\s*=\s*(["'])(.*?)\1/gi; let match; while ((match = re.exec(String(html || '')))) { const src = match[2].replace(/&amp;/g, '&').trim(); if ((/player\/video\.php\?id=/i.test(src) || /^\/\/emb\./i.test(src)) && !/ads\.livetv|getbanner|chateor|live-tv\.top/i.test(src)) return src.startsWith('//') ? `https:${src}` : new URL(src, LIVETV_BASE).href; } return ''; }
+function shiftDateText(date, offset) { const m = /^(\d{4})(\d{2})(\d{2})$/.exec(date); if (!m) return date; return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3] + offset)).toISOString().slice(0, 10).replace(/-/g, ''); }
+async function findLiveTVHighlight(event) { if (process.env.LIVETV_HIGHLIGHTS === '0' || !event || isRace(event)) return null; try { let date = startTime(event) ? new Date(startTime(event)).toISOString().slice(0, 10).replace(/-/g, '') : new Date().toISOString().slice(0, 10).replace(/-/g, ''); let entry, archiveUrl; for (let attempt = 0; attempt < 2 && !entry; attempt++, date = shiftDateText(date, -1)) { archiveUrl = `${LIVETV_ARCHIVE}${date}/`; entry = parseLiveTVArchive(await livetvProxyFetch(archiveUrl, livetvArchiveCache, 3600000), event, archiveUrl); } if (!entry) return null; const rawSource = extractLiveTVIframe(await livetvProxyFetch(entry.showUrl, livetvShowCache, 300000)); if (!rawSource) return null; const playerUrl = `${PLAYER_BASE}?embed=${encodeURIComponent(rawSource)}`; return { url: playerUrl, playerUrl, source: 'livetv', sourceKind: 'iframe', rawSource, pageUrl: entry.archiveUrl, replayUrl: entry.archiveUrl, matchId: entry.matchId, title: `${homeName(event)} vs ${awayName(event)} Highlights` }; } catch (error) { console.warn(`[LiveTV] ${error.message}`); return null; } }
+
 async function findSuperSportHighlight(event) {
   if (process.env.SUPERSPORT_HIGHLIGHTS === '0' || isRace(event) || event?.type === 'race') return null;
   const sport = supersportSportFor(event); if (!sport) return null;
@@ -960,13 +972,17 @@ async function processEvents(events, ctx) {
     try {
       key = eventKey(event, index);
       const marker = markerFor(key), streams = streamLinks(event), final = isFinal(event);
-      let superSport = null;
-      if (final && event.type === 'match' && !event.externalSources?.some(source => source.source === 'onetv')) superSport = await findSuperSportHighlight(event);
-      if (superSport) { event.highlightsUrl = superSport.playerUrl; event.replayUrl = superSport.pageUrl; event.externalSources = [...(event.externalSources || []), { url: superSport.rawSource, type: superSport.sourceKind === 'm3u8' ? 'mora' : 'embed', source: 'supersport' }]; }
+      let superSport = null, liveTV = null;
+      if (final && event.type === 'match' && !event.externalSources?.some(source => source.source === 'onetv')) {
+        superSport = await findSuperSportHighlight(event);
+        if (!superSport) liveTV = await findLiveTVHighlight(event);
+      }
+      const replayFallback = superSport || liveTV;
+      if (replayFallback) { event.highlightsUrl = replayFallback.playerUrl; event.replayUrl = replayFallback.pageUrl; event.externalSources = [...(event.externalSources || []), { url: replayFallback.rawSource, type: replayFallback.sourceKind === 'm3u8' ? 'mora' : 'embed', source: replayFallback.source }]; }
       existing = byMarker.get(marker) || null;
       const label = isRace(event) ? eventName(event) : displayEventName(event);
       title = isRace(event) ? (final ? `${label} – Full Race Replay | Sports 803` : `${label} – Race Preview & Live Stream | Sports 803`) : (final ? `${label} – Highlights & Replay | Sports 803` : `${label} – ${leagueName(event)} Live Stream | Sports 803`);
-      const desiredPlayer = superSport?.playerUrl || playerUrlFor(event, streams);
+      const desiredPlayer = replayFallback?.playerUrl || playerUrlFor(event, streams);
       const shouldUpdate = existing ? (forceUpdateEnabled() || await needsUpdate(existing, { event, final, desiredPlayer }, ctx)) : false;
       if (existing && !shouldUpdate) {
         counts.skipped++;
@@ -1003,7 +1019,7 @@ async function processEvents(events, ctx) {
       }
       byMarker.set(marker, post);
       console.log(`${action} ${post.id}: ${title}`);
-      logEvent({ key, action, postId: post.id, title, hlSource: superSport?.source || '' });
+      logEvent({ key, action, postId: post.id, title, hlSource: replayFallback?.source || '' });
       await sleepFn(500 + Math.random() * 300);
     } catch (error) {
       counts.failed++;
@@ -1065,7 +1081,7 @@ export {
   text, pick, htmlEscape, stableHash, isFinal, isDead, eventName, eventScore, leagueName, leagueId, canonicalLeague, isRace,
   localDate, isToday, isTodayOrTomorrow, isEligibleForPosting, eventDateWindow, streamLinks, teamKey, teamsMatch, pairMatch,
   attachExternalSources, buildFeedIndex, parseXoilacLinks, replayLinks, eventKey, markerFor, labelsFor, playerUrlFor,
-  dashboardSections, raceSections, previewSections, highlightsSections, playerDataSections, playerIframe, contentHasPlayer, hasEscapedPlayerQuerySeparator, supersportSportFor, fetchSuperSportPage, extractSuperSportVideo, findSuperSportHighlight,
+  dashboardSections, raceSections, previewSections, highlightsSections, playerDataSections, playerIframe, contentHasPlayer, hasEscapedPlayerQuerySeparator, supersportSportFor, fetchSuperSportPage, extractSuperSportVideo, findSuperSportHighlight, findLiveTVHighlight, parseLiveTVArchive, extractLiveTVIframe,
   teamLogoUrl, saveLogoCache, resetLogoCache, logoMarkup, thumbnailSvg, rasterizeThumbnail, uploadImgBb,
   accessToken, listPosts, getPostBody, getPostForRepair, repairMalformedPlayerUrls, rewriteOneBallReplayIframes, repairOneBallReplayUrls, bloggerWrite, processEvents, needsUpdate, forceUpdateEnabled, parseDashboardEvent, hydrateEventPlayerData, enrichEventsWithPlayerData, fetchLeague, fetchDashboardEvents, fetchRacingFromTSDB, leagueFetchStatus, leagueFetchSource, normalizePlayerBase, normalizePlayerUrlsInHtml
 };

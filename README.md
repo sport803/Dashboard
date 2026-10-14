@@ -80,3 +80,6 @@ The refresh token is required because GitHub Actions does not have a browser ses
 - A run with no matching stream events safely makes no Blogger changes.
 
 The existing dashboard UI still supports interactive Google sign-in, manual posting, bulk posting, and its browser-tab scheduler. The GitHub Action is the unattended path.
+
+
+Optional Actions variable: `LIVETV_HIGHLIGHTS` enables the LiveTV.sx replay fallback; set it to `0` to disable it.
