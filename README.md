@@ -80,3 +80,9 @@ The refresh token is required because GitHub Actions does not have a browser ses
 - A run with no matching stream events safely makes no Blogger changes.
 
 The existing dashboard UI still supports interactive Google sign-in, manual posting, bulk posting, and its browser-tab scheduler. The GitHub Action is the unattended path.
+
+### Xoilac event source
+
+The browser Dashboard can fetch football match cards from `https://xoilaczzz.pro/` through the existing public CORS-proxy pattern, parse team names, competition, kickoff, status and the selected `/link/N/` event route, then merge matching fixtures into ESPN events. Unmatched fixtures appear under the **Xoilac Live** league filter. The source is enabled by default; existing saved Dashboard configurations are migrated once while preserving an intentionally empty league selection. Event cards link to the Xoilac source, and generated Sports 803 player URLs retain the existing `one=` stream parameter while adding `&xoilac=<event-link>`.
+
+Xoilac access depends on the upstream site and the available CORS proxies. Fetch failures are surfaced in the source-status line and can be retried from the league filter rather than being presented as an empty feed.

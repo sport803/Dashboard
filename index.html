@@ -2198,6 +2198,7 @@ button:disabled { opacity: .4; cursor: not-allowed; transform: none !important; 
 <div id="toasts" role="status" aria-live="polite"></div>
 
 <script src="https://accounts.google.com/gsi/client" async></script>
+<script src="scripts/xoilac-events.js"></script>
 <script>
 // CHANGELOG — Highlights and Blogger cleanup
 // Added: robust OneBall stream extraction, highlight templates, generic league labels, and complete legacy sign-in removal.
@@ -2244,7 +2245,7 @@ function normalizePlayerUrlsInHtml(html) {
 // ----- STATE -----
 let CFG = {
   blogId: '', clientId: EVENT_BUILTIN_CLIENT_ID, imgbbKey: '', playerBase: 'https://www.sport803.online/p/player.html', Url: '', Username: '',
-  activeLeagues: ['ucl', 'uwcl', 'epl', 'laliga', 'seriea', 'bundesliga', 'f1', 'nba', 'wnba', 'efltrophy', 'afconqual', 'euroqual', 'concacafnl', 'nations', 'ufc'],
+  activeLeagues: ['ucl', 'uwcl', 'epl', 'laliga', 'seriea', 'bundesliga', 'f1', 'nba', 'wnba', 'efltrophy', 'afconqual', 'euroqual', 'concacafnl', 'nations', 'ufc', 'xoilac'],
   schedTiming: 60, schedStatus: 'DRAFT', schedInterval: 300000,
   schedEnabled: false, schedThumbs: true, logoOverridesRaw: '',
   mediaPlayerBase: 'https://www.sport803.online/p/player.html',
@@ -2361,6 +2362,11 @@ function migrateRemoveLegacyConfig() {
 function loadAll() {
   migrateRemoveLegacyConfig();
   try { const p = JSON.parse(localStorage.getItem(SK_CFG) || '{}'); if (p.data) CFG = { ...CFG, ...p.data }; } catch(e) {}
+  if (!CFG.xoilacSourceMigrated) {
+    if (Array.isArray(CFG.activeLeagues) && CFG.activeLeagues.length && !CFG.activeLeagues.includes('xoilac')) CFG.activeLeagues.push('xoilac');
+    CFG.xoilacSourceMigrated = true;
+    saveAll();
+  }
   CFG.playerBase = normalizePlayerBaseUrl(CFG.playerBase);
   CFG.mediaPlayerBase = normalizePlayerBaseUrl(CFG.mediaPlayerBase);
   try { const p = JSON.parse(localStorage.getItem(SK_CH) || '{}'); channels = p.data?.length ? p.data : DEFAULT_CHANNELS; } catch(e) { channels = [...DEFAULT_CHANNELS]; }
@@ -2530,6 +2536,7 @@ const LEAGUES = [
   { id: 'motogp', sport: 'racing', slug: 'motogp', name: 'MotoGP', icon: '🏍️', type: 'race' },
   { id: 'cycling', sport: 'cycling', slug: 'world', name: 'Cycling', icon: '🚴', type: 'race' },
   { id: 'mlb', sport: 'baseball', slug: 'mlb', name: 'MLB', icon: '⚾', type: 'match' },
+  { id: 'xoilac', sport: 'soccer', slug: 'xoilac', name: 'Xoilac Live', icon: '⚽', type: 'match' },
 ];
 
 const DEFAULT_CHANNELS = [
@@ -3144,11 +3151,11 @@ function dedupeEvents(events) { const seen = new Set(); return events.filter(eve
 function setLeagueFetchResult(league, status, source) { leagueFetchStatus[league.id] = status; leagueFetchSource[league.id] = source || ''; }
 function updateLeagueFetchStatus() {
   const active = LEAGUES.filter(league => CFG.activeLeagues.includes(league.id));
-  const counts = { ok: 0, empty: 0, error: 0 }, sources = { ESPN: 0, 'TheSportsDB': 0 }, errors = [];
+  const counts = { ok: 0, empty: 0, error: 0 }, sources = { ESPN: 0, 'TheSportsDB': 0, Xoilac: 0 }, errors = [];
   active.forEach(league => { const status = leagueFetchStatus[league.id]; if (status) counts[status] = (counts[status] || 0) + 1; const source = leagueFetchSource[league.id]; if (source) sources[source] = (sources[source] || 0) + 1; if (status === 'error') errors.push(league); });
   const errorHtml = errors.length ? ' · ' + errors.map(league => '<button class="btn-ghost btn-xs" style="margin-left:3px" onclick="retryLeagueFetch(\'' + league.id + '\')">' + escapeLogoHtml(league.name) + ' ↻</button>').join(' ') : '';
   const el = document.getElementById('league-fetch-status');
-  if (el) el.innerHTML = 'Sources: ESPN ' + (sources.ESPN || 0) + ' · TheSportsDB ' + (sources.TheSportsDB || 0) + ' · ' + (counts.error || 0) + ' errored' + (counts.empty ? ' · ' + counts.empty + ' empty' : '') + errorHtml;
+  if (el) el.innerHTML = 'Sources: ESPN ' + (sources.ESPN || 0) + ' · TheSportsDB ' + (sources.TheSportsDB || 0) + ' · Xoilac ' + (sources.Xoilac || 0) + ' · ' + (counts.error || 0) + ' errored' + (counts.empty ? ' · ' + counts.empty + ' empty' : '') + errorHtml;
 }
 async function fetchTSDBRacingDay(date) {
   if (tsdbRacingDayCache.has(date)) return tsdbRacingDayCache.get(date);
@@ -3168,6 +3175,30 @@ async function fetchRacingFromTSDB(league, dates = dateWindow()) {
   }).map(event => ({ id: event.idEvent, league, type: 'race', name: event.strEvent || league.name + ' race', venue: event.strVenue || '', location: event.strCity || event.strCountry || '', entries: [], status: event.strStatus || 'Scheduled', startTime: event.strTimestamp ? new Date(event.strTimestamp) : (event.dateEvent ? new Date(event.dateEvent + 'T' + (event.strTime || '12:00:00')) : null), source: 'TheSportsDB' }));
   return dedupeEvents(events);
 }
+let xoilacHomepageCache = { html: '', fetchedAt: 0 };
+async function fetchXoilacHomepage(force = false) {
+  if (!force && xoilacHomepageCache.html && Date.now() - xoilacHomepageCache.fetchedAt < 2 * 60 * 1000) return xoilacHomepageCache.html;
+  const target = 'https://xoilaczzz.pro/';
+  const proxies = [
+    'https://corsproxy.io/?url=' + encodeURIComponent(target),
+    'https://api.allorigins.win/raw?url=' + encodeURIComponent(target)
+  ];
+  let lastError = null;
+  for (const proxy of proxies) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12000);
+    try {
+      const response = await fetch(proxy, { signal: controller.signal, cache: 'no-store' });
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      const html = await response.text();
+      if (html.length < 500 || !/grid-matches__item|redirectPopup/i.test(html)) throw new Error('Xoilac response did not contain match-card markup');
+      xoilacHomepageCache = { html, fetchedAt: Date.now() };
+      return html;
+    } catch (error) { lastError = error; console.warn('[Xoilac] proxy failed:', error.message); }
+    finally { clearTimeout(timeout); }
+  }
+  throw new Error('Xoilac could not be fetched through the available CORS proxies' + (lastError ? ': ' + lastError.message : ''));
+}
 async function fetchAllEvents() {
   document.getElementById('fetch-spinner').style.display = 'inline-block';
   const previousEvents = allEvents.slice();
@@ -3178,7 +3209,7 @@ async function fetchAllEvents() {
   results.forEach((result, index) => { if (result.status === 'rejected') console.warn('[Fetch] ' + active[index].name + ' failed: ' + (result.reason?.message || result.reason)); });
   const fetchedEvents = results.filter(r => r.status === 'fulfilled').flatMap(r => Array.isArray(r.value) ? r.value : []);
   if (!fetchedEvents.length && previousEvents.length) { allEvents = previousEvents; updateLeagueFetchStatus(); document.getElementById('fetch-spinner').style.display = 'none'; toast('Fetch failed; kept the previous event snapshot.', 'w'); return; }
-  allEvents = dedupeEvents(fetchedEvents);
+  allEvents = XoilacEvents.mergeXoilacEvents(dedupeEvents(fetchedEvents));
   dsArticleCache = {};
   document.getElementById('fetch-spinner').style.display = 'none';
   updateLeagueFetchStatus();
@@ -3196,6 +3227,16 @@ async function fetchAllEvents() {
 
 // v11: every slug failure is surfaced; an empty 200 response is distinct from an error.
 async function fetchLeague(league) {
+  if (league.id === 'xoilac') {
+    try {
+      const events = XoilacEvents.parseXoilacEvents(await fetchXoilacHomepage());
+      setLeagueFetchResult(league, events.length ? 'ok' : 'empty', 'Xoilac');
+      return events;
+    } catch (error) {
+      setLeagueFetchResult(league, 'error', 'Xoilac');
+      throw new Error('Xoilac failed: ' + error.message);
+    }
+  }
   const dates = dateWindow(), anchorDate = dates[1];
   if (league.type === 'race' && !ESPN_RACING_SUPPORTED.has(league.id)) {
     try { const events = await fetchRacingFromTSDB(league, dates); setLeagueFetchResult(league, events.length ? 'ok' : 'empty', 'TheSportsDB'); return events; }
@@ -3234,7 +3275,20 @@ async function retryLeagueFetch(leagueId) {
   if (!league) return;
   try {
     const events = await fetchLeague(league);
-    allEvents = dedupeEvents(allEvents.filter(event => event.league?.id !== league.id).concat(events));
+    if (league.id === 'xoilac') {
+      const withoutOldXoilac = allEvents.filter(event => event.source !== 'Xoilac').map(event => {
+        if (!event.xoilacUrl) return event;
+        const { xoilacUrl, xoilacPageUrl, ...cleanEvent } = event;
+        if (Array.isArray(cleanEvent.externalSources)) {
+          cleanEvent.externalSources = cleanEvent.externalSources.filter(source => source.type !== 'xoilac');
+          if (!cleanEvent.externalSources.length) delete cleanEvent.externalSources;
+        }
+        return cleanEvent;
+      });
+      allEvents = XoilacEvents.mergeXoilacEvents(dedupeEvents(withoutOldXoilac.concat(events)));
+    } else {
+      allEvents = dedupeEvents(allEvents.filter(event => event.league?.id !== league.id).concat(events));
+    }
     await enrichLogos(allEvents); renderLeagueFilterPills(); renderEventCards(allEvents); updateLeagueFetchStatus();
     toast(league.name + ' refreshed ✓', 's');
   } catch (error) { console.warn('[Fetch] ' + league.name + ' retry failed: ' + error.message); updateLeagueFetchStatus(); toast(league.name + ' failed: ' + error.message, 'w'); }
@@ -3311,7 +3365,7 @@ function parseESPNPlayerData(ev, summary) {
   return data;
 }
 async function hydrateEventPlayerData(ev, options = {}) {
-  if (!ev || ev.type !== 'match' || !CFG.enrichPlayerData || !playerDataSportSupported(ev)) return null;
+  if (!ev || ev.type !== 'match' || ev.source === 'Xoilac' || !CFG.enrichPlayerData || !playerDataSportSupported(ev)) return null;
   const key = String(ev.id || evKey(ev)); if (!options.force && playerDataCache.has(key)) { ev.playerData = playerDataCache.get(key); return ev.playerData; }
   try {
     const url = ESPN + '/' + (ev.league?.sport || 'soccer') + '/' + (ev.league?.slug || '') + '/summary?event=' + encodeURIComponent(ev.id);
@@ -4134,13 +4188,14 @@ function renderMatchCard(ev) {
   const leagueIcon = escapeLogoHtml(ev.league.icon);
   const status = escapeLogoHtml(ev.status);
   const postLink = pl?.postUrl ? `<div style="font-size:.62rem;color:var(--muted2)">📝 <a href="${escapeLogoHtml(pl.postUrl)}" target="_blank" rel="noopener noreferrer" style="color:var(--blue)">View post</a></div>` : '';
+  const xoilacLink = ev.xoilacUrl ? `<div style="font-size:.62rem;color:var(--muted2)">📺 <a href="${escapeLogoHtml(ev.xoilacUrl)}" target="_blank" rel="noopener noreferrer" style="color:var(--green)">Xoilac source</a></div>` : '';
   const score = ev.home.score !== '' ? `${escapeLogoHtml(ev.home.score)} – ${escapeLogoHtml(ev.away.score)}` : 'vs';
   return `<div class="event-card ${pl?.thumb ? 'has-thumb' : ''} ${pl?.postId ? 'posted' : ''}" data-id="${escapeLogoHtml(ev.id)}">
     <div class="ec-top"><span class="ec-league">${leagueIcon} ${leagueName}</span><div style="display:flex;align-items:center;gap:4px">${thumbBadge}${badge}<span class="ec-status ${escapeLogoHtml(sc)}">${status}</span></div></div>
     <div class="ec-match"><div class="ec-team">${hChip}<div class="ec-team-name">${homeName}</div></div>
     <div style="display:flex;flex-direction:column;align-items:center"><div class="ec-vs">${score}</div><div class="ec-time">${escapeLogoHtml(ts)}</div></div>
     <div class="ec-team">${aChip}<div class="ec-team-name">${awayName}</div></div></div>
-    ${postLink}
+    ${postLink}${xoilacLink}
     <div class="ec-actions"><button class="btn-red btn-sm" onclick="genAndFill('${sid}')">✍️ Gen</button><button class="btn-blue btn-sm" onclick="quickPostEv('${sid}')">📤 Post</button><button class="btn-gold btn-sm" onclick="genThumbForEv('${sid}')">🖼️ Thumb</button><button class="btn-orange btn-sm" onclick="quickPostHighlights('${sid}')">🎬 HL</button><button class="btn-ghost btn-sm" onclick="refreshEventPlayerData('${sid}')">👤 Data</button></div></div>`;
 }
 
@@ -4628,6 +4683,7 @@ async function getDdkanquSourcesForEvent(ev) {
 
 async function getAllStreamSourcesForEvent(ev) {
   const sources = [...getChannelsForEvent(ev)];
+  if (ev.xoilacUrl) sources.push({ url: ev.xoilacUrl, type: 'xoilac', source: 'xoilac' });
   if (ev.type === 'match') {
     sources.push(...getOneTVSourcesForEvent(ev));
     sources.push(...getPPVTVSourcesForEvent(ev));
@@ -4640,16 +4696,7 @@ async function getAllStreamSourcesForEvent(ev) {
 }
 
 function buildSports803PlayerUrl(sources) {
-  if (!sources || !sources.length) return '';
-  const base = normalizePlayerBaseUrl(CFG.mediaPlayerBase);
-  const one = sources.find(s => s.type === 'one' || s.type === 'm3u8');
-  const mora = sources.find(s => s.type === 'mora' || s.type === 'hls');
-  const embeds = sources.filter(s => s.type === 'embed');
-  const params = [];
-  if (one?.url) params.push('one=' + one.url);
-  else if (mora?.url) params.push('mora=' + encodeURIComponent(mora.url));
-  embeds.forEach(s => { if (s.url) params.push('embed=' + encodeURIComponent(s.url)); });
-  return params.length ? base + '/?' + params.join('&') : '';
+  return XoilacEvents.buildPlayerUrl(normalizePlayerBaseUrl(CFG.mediaPlayerBase), sources);
 }
 
 function buildMultiSourceIframe(sources) {
@@ -6169,7 +6216,7 @@ async function buildArticleWithStreams(title, ev, isHighlights = false) {
     }
     return base;
   }
-  if (!CFG.autoFetchStreams) return base;
+  if (!CFG.autoFetchStreams && !ev.xoilacUrl) return base;
   try {
     const sources = await getAllStreamSourcesForEvent(ev);
     if (!sources.length) return base;
