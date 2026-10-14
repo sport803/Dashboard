@@ -29,7 +29,7 @@ on:
         default: 'false'
         type: boolean
       repair_oneball_replay_urls:
-        description: 'Change OneBall live iframe URLs to replay URLs on all auto-poster event posts'
+        description: 'Migrate OneBall iframe URLs to .htm replay URLs on all auto-poster event posts'
         required: false
         default: 'false'
         type: boolean

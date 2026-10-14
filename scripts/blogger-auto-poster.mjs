@@ -352,7 +352,7 @@ function xoilacPairMatch(event, entry) {
 
 function oneBallUrl(matchId, mode = 'live') {
   const route = mode === 'replay' ? 'replay' : 'live';
-  return `https://oneball.live/${route}/${encodeURIComponent(String(matchId).replace(/\.html?$/i, ''))}.html`;
+  return `https://oneball.live/${route}/${encodeURIComponent(String(matchId).replace(/\.html?$/i, ''))}.htm`;
 }
 function normalizePlayerUrlsInHtml(html) {
   return String(html || '').replace(/((?:https?:\/\/)[^"'<>\s]+\/player\.html)\/+\?/gi, '$1?');
@@ -722,7 +722,8 @@ function rewriteOneBallReplayIframes(content) {
       if (!/^(?:www\.)?sport803\.online$/i.test(playerUrl.hostname) || playerUrl.pathname.toLowerCase() !== '/p/player.html' || !/oneball\.live/i.test(src)) return attribute;
       const replaySrc = src
         .replace(/(https?:\/\/oneball\.live\/)live\//gi, '$1replay/')
-        .replace(/(https?%3A%2F%2Foneball\.live%2F)live%2F/gi, '$1replay%2F');
+        .replace(/(https?%3A%2F%2Foneball\.live%2F)live%2F/gi, '$1replay%2F')
+        .replace(/\.html?(?=&|$)/gi, '.htm');
       if (replaySrc === src) return attribute;
       changed = true;
       return `${prefix}${quote}${replaySrc}${quote}`;

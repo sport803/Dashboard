@@ -110,7 +110,7 @@ test('OneBall links remain supported when no Xoilac feed is provided', async () 
 
   assert.deepEqual(event.externalSources.map(source => source.source), ['onetv']);
   const player = playerUrlFor(event, []);
-  assert.match(player, /oneball\.live\/live\/ob-77\.html/);
+  assert.match(player, /oneball\.live\/live\/ob-77\.htm/);
   assert.doesNotMatch(player, /ppvtv|embed=/i);
 });
 
@@ -125,11 +125,11 @@ test('Xoilac homepage match links are normalized and paired with OneBall in the 
   const [paired] = await attachExternalSources([event], {
     oneball: [{ id: '4628431', home: 'Feyenoord', away: 'Como' }], xoilac: found
   });
-  assert.equal(playerUrlFor(paired, []), 'https://www.sport803.online/p/player.html?one=https://oneball.live/live/4628431.html&xoilac=https://xoilaczzz.pro/truc-tiep/feyenoord-vs-como-luc-2345-ngay-14-10-2026/');
+  assert.equal(playerUrlFor(paired, []), 'https://www.sport803.online/p/player.html?one=https://oneball.live/live/4628431.htm&xoilac=https://xoilaczzz.pro/truc-tiep/feyenoord-vs-como-luc-2345-ngay-14-10-2026/');
   const iframe = playerIframe(paired, []);
   assert.match(iframe, /src="[^"]*&xoilac=https:\/\/xoilaczzz\.pro\/truc-tiep\//);
   assert.doesNotMatch(iframe, /&amp;xoilac=/);
-  assert.equal(playerUrlFor({ ...paired, status: 'Final' }, []), 'https://www.sport803.online/p/player.html?one=https://oneball.live/replay/4628431.html&xoilac=https://xoilaczzz.pro/truc-tiep/feyenoord-vs-como-luc-2345-ngay-14-10-2026/');
+  assert.equal(playerUrlFor({ ...paired, status: 'Final' }, []), 'https://www.sport803.online/p/player.html?one=https://oneball.live/replay/4628431.htm&xoilac=https://xoilaczzz.pro/truc-tiep/feyenoord-vs-como-luc-2345-ngay-14-10-2026/');
 });
 
 test('Xoilac U19 pages are not attached to senior fixtures', async () => {
@@ -145,9 +145,9 @@ test('OneBall replays use the replay path while live posts keep the live path', 
   const [liveEvent] = await attachExternalSources([matchEvent], feeds);
   const [finalEvent] = await attachExternalSources([{ ...matchEvent, status: 'Final', replayUrl: 'https://example.test/old-replay' }], feeds);
 
-  assert.equal(playerUrlFor(liveEvent, []), 'https://www.sport803.online/p/player.html?one=https://oneball.live/live/4578214.html');
-  assert.equal(playerUrlFor(finalEvent, []), 'https://www.sport803.online/p/player.html?one=https://oneball.live/replay/4578214.html');
-  assert.deepEqual(replayLinks(finalEvent), ['https://www.sport803.online/p/player.html?one=https://oneball.live/replay/4578214.html']);
+  assert.equal(playerUrlFor(liveEvent, []), 'https://www.sport803.online/p/player.html?one=https://oneball.live/live/4578214.htm');
+  assert.equal(playerUrlFor(finalEvent, []), 'https://www.sport803.online/p/player.html?one=https://oneball.live/replay/4578214.htm');
+  assert.deepEqual(replayLinks(finalEvent), ['https://www.sport803.online/p/player.html?one=https://oneball.live/replay/4578214.htm']);
 });
 
 test('history repair changes only OneBall sources inside player iframe src attributes', () => {
@@ -155,8 +155,8 @@ test('history repair changes only OneBall sources inside player iframe src attri
   const result = rewriteOneBallReplayIframes(source);
 
   assert.equal(result.changed, true);
-  assert.match(result.content, /oneball\.live\/replay\/4578214\.html/);
-  assert.match(result.content, /oneball\.live%2Freplay%2F4578215\.html/);
+  assert.match(result.content, /oneball\.live\/replay\/4578214\.htm/);
+  assert.match(result.content, /oneball\.live%2Freplay%2F4578215\.htm/);
   assert.match(result.content, /<p>https:\/\/oneball\.live\/live\/ignore-this\.html<\/p>/);
   assert.match(result.content, /other\.example\/player\.html\?one=https:\/\/oneball\.live\/live\/123\.html/);
   assert.deepEqual(rewriteOneBallReplayIframes(result.content), { content: result.content, changed: false });
