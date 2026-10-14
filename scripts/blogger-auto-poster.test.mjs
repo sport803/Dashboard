@@ -10,6 +10,7 @@ import {
   markerFor,
   needsUpdate,
   playerUrlFor,
+  parseXoilacLinks,
   replayLinks,
   rewriteOneBallReplayIframes,
   rasterizeThumbnail,
@@ -82,7 +83,7 @@ test('normal league feed results include the target day and tomorrow, not yester
   }
 });
 
-test('OneBall is the only scraped external event link, even when legacy PPV feeds are passed in', async () => {
+test('OneBall links remain supported when no Xoilac feed is provided', async () => {
   const [event] = await attachExternalSources([matchEvent], {
     oneball: [{ id: 'ob-77', home: 'Chelsea', away: 'Arsenal' }],
     ppv: [{ home: 'Arsenal', away: 'Chelsea', urls: ['https://ppvtv.example/live/123'] }]
@@ -92,6 +93,21 @@ test('OneBall is the only scraped external event link, even when legacy PPV feed
   const player = playerUrlFor(event, []);
   assert.match(player, /oneball\.live\/live\/ob-77\.html/);
   assert.doesNotMatch(player, /ppvtv|embed=/i);
+});
+
+
+test('Xoilac homepage match links are normalized and paired with OneBall in the player iframe', async () => {
+  const html = '<a href="https://xoilaczzz.pro/truc-tiep/feyenoord-vs-como-luc-2345-ngay-14-10-2026/link/3/">Watch match</a><a href="https://evil.example/truc-tiep/arsenal-vs-chelsea-luc-1/">ignore</a>';
+  const found = parseXoilacLinks(html);
+  assert.deepEqual(found.map(({ url, home, away }) => ({ url, home, away })), [{
+    url: 'https://xoilaczzz.pro/truc-tiep/feyenoord-vs-como-luc-2345-ngay-14-10-2026/', home: 'Feyenoord', away: 'Como'
+  }]);
+  const event = { ...matchEvent, homeName: 'Feyenoord', awayName: 'Como' };
+  const [paired] = await attachExternalSources([event], {
+    oneball: [{ id: '4628431', home: 'Feyenoord', away: 'Como' }], xoilac: found
+  });
+  assert.equal(playerUrlFor(paired, []), 'https://www.sport803.online/p/player.html?one=https://oneball.live/live/4628431.html&xoilac=https://xoilaczzz.pro/truc-tiep/feyenoord-vs-como-luc-2345-ngay-14-10-2026/');
+  assert.equal(playerUrlFor({ ...paired, status: 'Final' }, []), 'https://www.sport803.online/p/player.html?one=https://oneball.live/replay/4628431.html&xoilac=https://xoilaczzz.pro/truc-tiep/feyenoord-vs-como-luc-2345-ngay-14-10-2026/');
 });
 
 test('OneBall replays use the replay path while live posts keep the live path', async () => {

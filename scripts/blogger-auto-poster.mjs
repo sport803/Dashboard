@@ -20,6 +20,8 @@ const ESPN_API = 'https://site.api.espn.com/apis/site/v2/sports';
 function normalizePlayerBase(value) { return text(value).replace(/\/+$/, ''); }
 const PLAYER_BASE = normalizePlayerBase(process.env.PLAYER_BASE_URL || 'https://www.sport803.online/p/player.html');
 const ONEBALL_LIST_URL = 'https://oneball.live/list.json';
+const XOILAC_HOME_URL = text(process.env.XOILAC_HOME_URL) || 'https://xoilaczzz.pro/';
+const XOILAC_HOST = 'xoilaczzz.pro';
 const TSDB_API = 'https://www.thesportsdb.com/api/v1/json/3';
 const IMGBB_API = 'https://api.imgbb.com/1/upload';
 const USER_AGENT = 'Sports803-Blogger-AutoPoster/1.0';
@@ -350,18 +352,26 @@ function sports803PlayerUrl(sources) {
   const embeds = sources.filter(source => source.type === 'embed');
   const params = [];
   if (one?.url) params.push(`one=${one.url}`);
+  const xoilac = sources.find(source => source.type === 'xoilac');
+  if (xoilac?.url) params.push(`xoilac=${xoilac.url}`);
   else if (mora?.url) params.push(`mora=${encodeURIComponent(mora.url)}`);
   embeds.forEach(source => { if (source.url) params.push(`embed=${encodeURIComponent(source.url)}`); });
   return params.length ? normalizePlayerUrlsInHtml(`${PLAYER_BASE}?${params.join('&')}`) : '';
 }
 async function loadExternalSources() {
-  const result = { oneball: [] };
+  const result = { oneball: [], xoilac: [] };
   try {
     const raw = await getJson(ONEBALL_LIST_URL, { headers: { accept: 'application/json', 'user-agent': USER_AGENT } });
     const entries = Array.isArray(raw) ? raw : raw?.matches || raw?.data || raw?.list || [];
     result.oneball = entries.map(entry => ({ id: entry.nami_id || entry.id, home: entry.home_team || entry.home_team_name || entry.home?.name || entry.home, away: entry.away_team || entry.away_team_name || entry.away?.name || entry.away })).filter(entry => entry.id && entry.home && entry.away);
     console.log(`[OneBall] loaded ${result.oneball.length} match links`);
   } catch (error) { console.warn(`[OneBall] ${error.message}`); }
+  try {
+    const response = await fetch(XOILAC_HOME_URL, { headers: { accept: 'text/html', 'user-agent': USER_AGENT }, signal: timeoutSignal() });
+    if (!response.ok) throw new HttpError(`${response.status} ${response.statusText} from ${XOILAC_HOME_URL}`, { status: response.status });
+    result.xoilac = parseXoilacLinks(await response.text());
+    console.log(`[Xoilac] loaded ${result.xoilac.length} match links`);
+  } catch (error) { console.warn(`[Xoilac] ${error.message}`); }
   return result;
 }
 /** Map keyed by "teamKey(home)|teamKey(away)" AND the reversed key; first entry wins. */
@@ -383,6 +393,31 @@ function findFeedMatch(index, entries, event) {
   const exact = home && away ? index.get(`${home}|${away}`) : undefined;
   return exact || entries.find(entry => pairMatch(event, entry.home, entry.away));
 }
+function parseXoilacLinks(html) {
+  const links = new Map();
+  const decode = value => String(value || '').replace(/&amp;/g, '&').replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n))).replace(/&#x([\da-f]+);/gi, (_, n) => String.fromCharCode(parseInt(n, 16)));
+  const stripTags = value => decode(value.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+  const anchors = String(html || '').match(/<a\b[^>]*>[\s\S]*?<\/a>/gi) || [];
+  for (const anchor of anchors) {
+    const href = anchor.match(/\bhref\s*=\s*(["'])(.*?)\1/i)?.[2];
+    if (!href) continue;
+    let url;
+    try { url = new URL(decode(href), XOILAC_HOME_URL); } catch { continue; }
+    if (url.protocol !== 'https:' || ![XOILAC_HOST, `www.${XOILAC_HOST}`].includes(url.hostname.toLowerCase())) continue;
+    const path = url.pathname.replace(/\/link\/\d+\/?$/i, '/').replace(/\/+$/, '');
+    const slug = path.match(/^\/truc-tiep\/([^/]+)$/i)?.[1];
+    if (!slug || !/-vs?-/.test(slug)) continue;
+    const teamPart = slug.replace(/-luc-.*$/i, '');
+    const parts = teamPart.split(/-vs?-/i);
+    if (parts.length !== 2) continue;
+    const pretty = part => part.replace(/-/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+    const [home, away] = parts.map(pretty);
+    const canonicalUrl = `https://${XOILAC_HOST}${path}/`;
+    const label = stripTags(anchor.replace(/^<a\b[^>]*>/i, '').replace(/<\/a>$/i, ''));
+    links.set(canonicalUrl, { url: canonicalUrl, home, away, label });
+  }
+  return [...links.values()];
+}
 function uniqueByUrl(sources) {
   const seen = new Set();
   return sources.filter(source => { if (!source.url || seen.has(source.url)) return false; seen.add(source.url); return true; });
@@ -390,12 +425,15 @@ function uniqueByUrl(sources) {
 async function attachExternalSources(events, feeds) {
   feeds = feeds || await loadExternalSources();
   const oneball = feeds.oneball || [];
-  const oneIndex = buildFeedIndex(oneball);
+  const xoilac = feeds.xoilac || [];
+  const oneIndex = buildFeedIndex(oneball), xoilacIndex = buildFeedIndex(xoilac);
   return events.map(event => {
     if (event.type !== 'match') return { ...event, externalSources: [] };
     const sources = [];
     const one = findFeedMatch(oneIndex, oneball, event);
+    const xoilacMatch = findFeedMatch(xoilacIndex, xoilac, event);
     if (one) sources.push({ url: oneBallUrl(one.id), type: 'one', source: 'onetv', matchId: String(one.id), home: one.home, away: one.away });
+    if (xoilacMatch) sources.push({ url: xoilacMatch.url, type: 'xoilac', source: 'xoilac', home: xoilacMatch.home, away: xoilacMatch.away });
     // oneballId is populated here (instead of deleting the branch in replayLinks) so the replay URL feature keeps working.
     return { ...event, externalSources: uniqueByUrl(sources), ...(one ? { oneballId: String(one.id) } : {}) };
   });
@@ -1007,7 +1045,7 @@ export {
   loadConfig, withRetry, isRetryable, HttpError, getJson,
   text, pick, htmlEscape, stableHash, isFinal, isDead, eventName, eventScore, leagueName, leagueId, canonicalLeague, isRace,
   localDate, isToday, isTodayOrTomorrow, isEligibleForPosting, eventDateWindow, streamLinks, teamKey, teamsMatch, pairMatch,
-  attachExternalSources, buildFeedIndex, replayLinks, eventKey, markerFor, labelsFor, playerUrlFor,
+  attachExternalSources, buildFeedIndex, parseXoilacLinks, replayLinks, eventKey, markerFor, labelsFor, playerUrlFor,
   dashboardSections, raceSections, previewSections, highlightsSections, playerDataSections, contentHasPlayer, supersportSportFor, fetchSuperSportPage, extractSuperSportVideo, findSuperSportHighlight,
   teamLogoUrl, saveLogoCache, resetLogoCache, logoMarkup, thumbnailSvg, rasterizeThumbnail, uploadImgBb,
   accessToken, listPosts, getPostBody, getPostForRepair, repairMalformedPlayerUrls, rewriteOneBallReplayIframes, repairOneBallReplayUrls, bloggerWrite, processEvents, needsUpdate, parseDashboardEvent, hydrateEventPlayerData, enrichEventsWithPlayerData, fetchLeague, fetchDashboardEvents, fetchRacingFromTSDB, leagueFetchStatus, leagueFetchSource, normalizePlayerBase, normalizePlayerUrlsInHtml

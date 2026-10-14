@@ -2270,7 +2270,7 @@ let currentComposeEv = null;
 let currentComposeRace = null;
 let fullRacesData = [];
 let tbGenCount = 0, composeGenCount = 0;
-let externalStreamsMap = {}, ddkanquCache = {}, ddkanquMappings = {}, ddkanquHomeMap = {}, oneTVHomeMap = {}, ppvTVHomeMap = {};
+let externalStreamsMap = {}, ddkanquCache = {}, ddkanquMappings = {}, ddkanquHomeMap = {}, oneTVHomeMap = {}, ppvTVHomeMap = {}, xoilacHomeMap = {};
 let dsArticleCache = {};
 let templates = {};
 let draftAutoSaveTimer = null;
@@ -4605,6 +4605,10 @@ function getOneTVSourcesForEvent(ev) {
   return [];
 }
 
+function getXoilacSourcesForEvent(ev) {
+  if (ev.type === 'race') return [];
+  return xoilacHomeMap[pairKey(ev.home?.name || '', ev.away?.name || '')] || [];
+}
 function getPPVTVSourcesForEvent(ev) {
   if (CFG.enablePPVTV === false || ev.type === 'race') return [];
   return ppvTVHomeMap[pairKey(ev.home?.name || '', ev.away?.name || '')] || [];
@@ -4630,6 +4634,7 @@ async function getAllStreamSourcesForEvent(ev) {
   const sources = [...getChannelsForEvent(ev)];
   if (ev.type === 'match') {
     sources.push(...getOneTVSourcesForEvent(ev));
+    sources.push(...getXoilacSourcesForEvent(ev));
     sources.push(...getPPVTVSourcesForEvent(ev));
   }
   if (CFG.autoFetchStreams) {
@@ -4645,11 +4650,13 @@ function buildSports803PlayerUrl(sources) {
   const one = sources.find(s => s.type === 'one' || s.type === 'm3u8');
   const mora = sources.find(s => s.type === 'mora' || s.type === 'hls');
   const embeds = sources.filter(s => s.type === 'embed');
+  const xoilac = sources.find(s => s.type === 'xoilac');
   const params = [];
   if (one?.url) params.push('one=' + one.url);
+  if (xoilac?.url) params.push('xoilac=' + xoilac.url);
   else if (mora?.url) params.push('mora=' + encodeURIComponent(mora.url));
   embeds.forEach(s => { if (s.url) params.push('embed=' + encodeURIComponent(s.url)); });
-  return params.length ? base + '/?' + params.join('&') : '';
+  return params.length ? base + '?' + params.join('&') : '';
 }
 
 function buildMultiSourceIframe(sources) {
@@ -4769,6 +4776,43 @@ async function fetchOneBallPendingMatches() {
   let cursor = 0;
   const worker = async () => { while (cursor < pending.length) { const match = pending[cursor++]; try { await fetchOneBallMatchPage(match); } catch (e) { console.warn('[OneTV] Match page failed', match.matchId, e.message); } } };
   await Promise.all(Array.from({ length: Math.min(4, pending.length) }, worker));
+}
+function parseXoilacHomepage(html) {
+  const found = {};
+  const anchors = String(html || '').match(/<a\b[^>]*>[\s\S]*?<\/a>/gi) || [];
+  anchors.forEach(anchor => {
+    const href = anchor.match(/\bhref\s*=\s*(["'])(.*?)\1/i)?.[2];
+    if (!href) return;
+    let url;
+    try { url = new URL(href.replace(/&amp;/g, '&'), 'https://xoilaczzz.pro/'); } catch (e) { return; }
+    if (url.protocol !== 'https:' || !['xoilaczzz.pro', 'www.xoilaczzz.pro'].includes(url.hostname.toLowerCase())) return;
+    let path = url.pathname.replace(/\/link\/\d+\/?$/i, '/').replace(/\/+$/, '');
+    const slug = path.match(/^\/truc-tiep\/([^/]+)$/i)?.[1];
+    if (!slug) return;
+    const parts = slug.replace(/-luc-.*$/i, '').split(/-vs?-/i);
+    if (parts.length !== 2) return;
+    const clean = value => value.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const home = clean(parts[0]), away = clean(parts[1]);
+    const key = pairKey(home, away);
+    if (!found[key]) found[key] = [{ url: 'https://xoilaczzz.pro' + path + '/', type: 'xoilac', source: 'xoilac', home, away }];
+  });
+  return found;
+}
+async function loadXoilacLinks() {
+  const homepage = 'https://xoilaczzz.pro/';
+  for (const proxy of [homepage, 'https://corsproxy.io/?' + encodeURIComponent(homepage), 'https://api.allorigins.win/raw?url=' + encodeURIComponent(homepage)]) {
+    try {
+      const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 12000);
+      const response = await fetch(proxy, { signal: controller.signal, headers: { Accept: 'text/html' } });
+      clearTimeout(timeout);
+      if (!response.ok) continue;
+      const html = await response.text();
+      const result = parseXoilacHomepage(html);
+      if (Object.keys(result).length) { xoilacHomeMap = result; console.log('[Xoilac] Loaded ' + Object.keys(result).length + ' match page(s)'); return Object.keys(result).length; }
+    } catch (error) { console.warn('[Xoilac]', error.message); }
+  }
+  console.warn('[Xoilac] Homepage links unavailable; continuing without this source');
+  return 0;
 }
 function parseOneBallList(payload) {
   if (Array.isArray(payload)) return payload;
@@ -4924,6 +4968,7 @@ async function refreshAllStreams() {
   const loaders = [];
   if (CFG.autoFetchStreams) { loaders.push(loadDDKanquHome()); }
   if (CFG.enableOneTV) loaders.push(loadOneTVStreams());
+  loaders.push(loadXoilacLinks());
   if (CFG.enablePPVTV !== false) loaders.push(loadPPVTVStreams());
   await Promise.all(loaders);
   ddkanquMappings = parseDDKMappings(CFG.ddkanquMappingsRaw);
@@ -6365,6 +6410,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const loaders = [];
     if (CFG.autoFetchStreams) { loaders.push(loadDDKanquHome().catch(e => console.warn('[DDKanqu]', e.message))); }
     if (CFG.enableOneTV) { loaders.push(loadOneTVStreams().catch(e => console.warn('[OneTV]', e.message))); }
+    loaders.push(loadXoilacLinks());
     loaders.push(loadPPVTVStreams().catch(e => console.warn('[PPVTV]', e.message)));
     Promise.all(loaders).then(() => {
       const oneTVTotal = Object.keys(oneTVHomeMap).length;
