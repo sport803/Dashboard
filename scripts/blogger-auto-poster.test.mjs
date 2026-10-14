@@ -10,6 +10,8 @@ import {
   markerFor,
   needsUpdate,
   playerUrlFor,
+  playerIframe,
+  hasEscapedPlayerQuerySeparator,
   parseXoilacLinks,
   replayLinks,
   rewriteOneBallReplayIframes,
@@ -123,6 +125,9 @@ test('Xoilac homepage match links are normalized and paired with OneBall in the 
     oneball: [{ id: '4628431', home: 'Feyenoord', away: 'Como' }], xoilac: found
   });
   assert.equal(playerUrlFor(paired, []), 'https://www.sport803.online/p/player.html?one=https://oneball.live/live/4628431.html&xoilac=https://xoilaczzz.pro/truc-tiep/feyenoord-vs-como-luc-2345-ngay-14-10-2026/');
+  const iframe = playerIframe(paired, []);
+  assert.match(iframe, /src="[^"]*&xoilac=https:\/\/xoilaczzz\.pro\/truc-tiep\//);
+  assert.doesNotMatch(iframe, /&amp;xoilac=/);
   assert.equal(playerUrlFor({ ...paired, status: 'Final' }, []), 'https://www.sport803.online/p/player.html?one=https://oneball.live/replay/4628431.html&xoilac=https://xoilaczzz.pro/truc-tiep/feyenoord-vs-como-luc-2345-ngay-14-10-2026/');
 });
 
@@ -164,6 +169,16 @@ test('successful thumbnail uploads are labelled within Blogger limits', () => {
   assert.ok(!normalLabels.includes('s803:thumbnail'));
   assert.ok(imageLabels.includes(markerFor('epl|espn-123')));
   assert.ok(imageLabels.length <= 20);
+});
+
+test('player iframe sources keep literal ampersands and escaped source posts are repaired', async () => {
+  const player = 'https://www.sport803.online/p/player.html?one=https://oneball.live/live/4628431.html&xoilac=https://xoilaczzz.pro/truc-tiep/feyenoord-vs-como-luc-2345-ngay-14-10-2026/';
+  const rawAmpHtml = `<iframe src="${player}"></iframe>`;
+  const escapedAmpHtml = rawAmpHtml.replace('&xoilac=', '&amp;xoilac=');
+  assert.equal(hasEscapedPlayerQuerySeparator(rawAmpHtml), false);
+  assert.equal(hasEscapedPlayerQuerySeparator(escapedAmpHtml), true);
+  const existing = { id: 'post-amp', labels: [markerFor('ucl|test'), 'Event Stream', 's803:thumbnail'], content: escapedAmpHtml };
+  assert.equal(await needsUpdate(existing, { event: matchEvent, final: false, desiredPlayer: player }, {}), true);
 });
 
 test('posts without the successful-thumbnail marker are automatically selected for repair', async () => {

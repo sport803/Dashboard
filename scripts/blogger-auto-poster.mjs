@@ -553,11 +553,11 @@ function dashboardSections(event, mode) {
 function playerIframe(event, streams) {
   const direct = streams.find(url => /\/player\.html\?(?:mora|embed)=/i.test(String(url || '')));
   const player = direct || playerUrlFor(event, streams);
-  return player ? `<div style="margin:18px 0;position:relative;padding-bottom:56.25%;height:0;overflow:hidden"><iframe loading="lazy" allow="encrypted-media" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0" src="${htmlEscape(player)}" frameborder="0" scrolling="no" allowfullscreen></iframe></div>` : '';
+  return player ? `<div style="margin:18px 0;position:relative;padding-bottom:56.25%;height:0;overflow:hidden"><iframe loading="lazy" allow="encrypted-media" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0" src="${htmlEscape(player).replace(/&amp;/g, '&')}" frameborder="0" scrolling="no" allowfullscreen></iframe></div>` : '';
 }
 function previewHtml(event, streams) { return dashboardSections(event, 'preview') + playerIframe(event, streams); }
 function highlightsHtml(event, streams) { const links = replayLinks(event); return dashboardSections(event, 'highlights') + playerIframe(event, links.length ? links : streams); }
-/** Post bodies store the player URL HTML-escaped (& -> &amp;), so compare against both forms. */
+/** Blogger APIs may return HTML-escaped or raw query separators; compare against both forms. */
 function contentHasPlayer(content, player) {
   const body = normalizePlayerUrlsInHtml(content);
   const wanted = normalizePlayerUrlsInHtml(player);
@@ -929,6 +929,9 @@ function contentHasPlayerData(content) {
   const body = String(content || '').toLowerCase();
   return /confirmed starting xis|probable xis|goal scorers|scorers|disciplinary|substitutions|danger men|team news/.test(body);
 }
+function hasEscapedPlayerQuerySeparator(content) {
+  return /<iframe\b[^>]*\bsrc\s*=\s*(["'])[^"']*\/player\.html\?[^"']*&amp;(?:one|xoilac|mora|embed)=/i.test(String(content || ''));
+}
 async function needsUpdate(existing, { event, final, desiredPlayer }, ctx) {
   if (final && !(existing.labels || []).includes('Highlights')) return true;
   // Older posts (and posts created during an ImgBB outage) must be repaired once a thumbnail upload works.
@@ -941,6 +944,7 @@ async function needsUpdate(existing, { event, final, desiredPlayer }, ctx) {
   }
   if (!desiredPlayer) return false;
   if (typeof existing.content !== 'string') existing.content = await getPostBody(ctx.token, ctx.blogId, existing.id);
+  if (hasEscapedPlayerQuerySeparator(existing.content)) return true;
   if (/\/player\.html\/+\?/i.test(existing.content)) return true;
   return !contentHasPlayer(existing.content, desiredPlayer);
 }
@@ -1059,7 +1063,7 @@ export {
   text, pick, htmlEscape, stableHash, isFinal, isDead, eventName, eventScore, leagueName, leagueId, canonicalLeague, isRace,
   localDate, isToday, isTodayOrTomorrow, isEligibleForPosting, eventDateWindow, streamLinks, teamKey, teamsMatch, pairMatch,
   attachExternalSources, buildFeedIndex, parseXoilacLinks, replayLinks, eventKey, markerFor, labelsFor, playerUrlFor,
-  dashboardSections, raceSections, previewSections, highlightsSections, playerDataSections, contentHasPlayer, supersportSportFor, fetchSuperSportPage, extractSuperSportVideo, findSuperSportHighlight,
+  dashboardSections, raceSections, previewSections, highlightsSections, playerDataSections, playerIframe, contentHasPlayer, hasEscapedPlayerQuerySeparator, supersportSportFor, fetchSuperSportPage, extractSuperSportVideo, findSuperSportHighlight,
   teamLogoUrl, saveLogoCache, resetLogoCache, logoMarkup, thumbnailSvg, rasterizeThumbnail, uploadImgBb,
   accessToken, listPosts, getPostBody, getPostForRepair, repairMalformedPlayerUrls, rewriteOneBallReplayIframes, repairOneBallReplayUrls, bloggerWrite, processEvents, needsUpdate, parseDashboardEvent, hydrateEventPlayerData, enrichEventsWithPlayerData, fetchLeague, fetchDashboardEvents, fetchRacingFromTSDB, leagueFetchStatus, leagueFetchSource, normalizePlayerBase, normalizePlayerUrlsInHtml
 };
