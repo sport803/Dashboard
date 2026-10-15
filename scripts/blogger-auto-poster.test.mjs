@@ -4,6 +4,7 @@ import {
   attachExternalSources,
   eventDateWindow,
   fetchLeague,
+  loadConfig,
   isEligibleForPosting,
   isTodayOrTomorrow,
   labelsFor,
@@ -30,6 +31,14 @@ const matchEvent = {
   awayName: 'Chelsea',
   startTime: '2026-10-12T17:00:00Z'
 };
+
+test('Blogger config accepts multiple IDs and preserves the legacy single-ID secret', () => {
+  const multi = loadConfig({ DRY_RUN: '1', BLOGGER_BLOG_IDS: ' 12345, 67890,12345 ' });
+  assert.deepEqual(multi.blogIds, ['12345', '67890']);
+  assert.equal(multi.blogId, '12345');
+  const legacy = loadConfig({ DRY_RUN: '1', BLOGGER_BLOG_ID: '24680' });
+  assert.deepEqual(legacy.blogIds, ['24680']);
+});
 
 test('the standard posting window includes local today and tomorrow across a year boundary', () => {
   const oldTimezone = process.env.EVENT_TIMEZONE;
