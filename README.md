@@ -83,3 +83,7 @@ The existing dashboard UI still supports interactive Google sign-in, manual post
 
 
 Optional Actions variable: `LIVETV_HIGHLIGHTS` enables the LiveTV.sx replay fallback; set it to `0` to disable it.
+
+## Advanced event matching and Firebase sync
+
+The dashboard and autoposter now share the documented provider-matching model described in [`docs/ADVANCED_EVENT_MATCHING.md`](docs/ADVANCED_EVENT_MATCHING.md). It normalizes team and competition aliases, records confidence/reasons, rejects tied candidates, preserves multiple provider records, and supports verified canonical-event synchronization to the existing `s803config/todaysMatches` Firebase path. Browser synchronization is manual by default and can be enabled explicitly in Settings.

@@ -2030,7 +2030,7 @@ button:disabled { opacity: .4; cursor: not-allowed; transform: none !important; 
       </div>
       <div class="settings-grid" style="margin-bottom:12px">
         <div class="form-group"><label>Event Firebase Database URL</label><input type="text" id="cfg-firebase-url" placeholder="https://sports-803-1b806-default-rtdb.firebaseio.com"></div>
-        <div class="form-group"><label>Event paths</label><input type="text" id="cfg-firebase-events-path" placeholder="s803config/todaysMatches"><input type="text" id="cfg-firebase-channels-path" placeholder="livetv/channels" style="margin-top:6px"><label style="display:block;margin-top:6px">Post log path</label><input type="text" id="cfg-firebase-post-log-path" placeholder="s803config/postLog"></div>
+        <div class="form-group"><label>Event paths</label><input type="text" id="cfg-firebase-events-path" placeholder="s803config/todaysMatches"><input type="text" id="cfg-firebase-channels-path" placeholder="livetv/channels" style="margin-top:6px"><label style="display:block;margin-top:6px">Post log path</label><input type="text" id="cfg-firebase-post-log-path" placeholder="s803config/postLog"><div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap"><button class="btn-blue btn-sm" onclick="syncCanonicalEventsToFirebase()">☁ Sync canonical events</button><button class="btn-ghost btn-sm" onclick="verifyFirebaseContract()">✓ Verify paths</button></div><div id="firebase-sync-status" style="margin-top:6px;font-size:.65rem;color:var(--muted2)">Canonical sync is manual.</div></div>
       </div>
       <div class="settings-grid" style="margin-bottom:12px">
         <div class="form-group"><label>August PPV Scraper API <span style="color:var(--blue);font-weight:400">(PPVTV)</span></label><input type="text" id="cfg-ppvtv-api" placeholder="https://august.ppvtv.icu/api/matches.json"></div>
@@ -2040,6 +2040,10 @@ button:disabled { opacity: .4; cursor: not-allowed; transform: none !important; 
         <label class="toggle" style="display:flex;align-items:center;gap:8px;font-size:.8rem;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:9px 11px">
           <input type="checkbox" id="cfg-auto-fetch-streams" onchange="saveCFG()"><div class="tslider"></div>
           <span style="text-transform:none;letter-spacing:0;color:var(--text)">Auto-fetch External Streams</span>
+        </label>
+        <label class="toggle" style="display:flex;align-items:center;gap:8px;font-size:.8rem;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:9px 11px">
+          <input type="checkbox" id="cfg-auto-sync-firebase" onchange="saveCFG()"><div class="tslider"></div>
+          <span style="text-transform:none;letter-spacing:0;color:var(--text)">Auto-sync canonical events</span>
         </label>
         <label class="toggle" style="display:flex;align-items:center;gap:8px;font-size:.8rem;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:9px 11px">
           <input type="checkbox" id="cfg-enable-ddkanqu" onchange="saveCFG()"><div class="tslider"></div>
@@ -2236,6 +2240,7 @@ const EVENT_FIREBASE_EVENTS_PATH = 's803config/todaysMatches';
 const EVENT_FIREBASE_CHANNELS_PATH = 'livetv/channels';
 const EVENT_FIREBASE_POST_LOG_PATH = 's803config/postLog';
 const EVENT_FIREBASE_ONEBALL_PATH = 's803config/oneball';
+const EVENT_FIREBASE_SYNC_LOG_PATH = 's803config/syncLogs';
 const PLAYER_BASE_URL = 'https://www.sport803.online/p/player.html';
 function normalizePlayerBaseUrl(value) {
   const raw = String(value || '').trim();
@@ -2257,7 +2262,7 @@ let CFG = {
   firebaseDatabaseUrl: EVENT_FIREBASE_DATABASE_URL,
   firebaseEventsPath: EVENT_FIREBASE_EVENTS_PATH,
   firebaseChannelsPath: EVENT_FIREBASE_CHANNELS_PATH,
-  firebasePostLogPath: EVENT_FIREBASE_POST_LOG_PATH,
+  firebasePostLogPath: EVENT_FIREBASE_POST_LOG_PATH, autoSyncFirebase: false,
   autoFetchStreams: false, enableDdkanqu: false, enableOneTV: false, enableLiveTV: true, enablePPVTV: true, embedStreamsInPost: true, enrichPlayerData: true,
   ddkanquMappingsRaw: '',
   deepseekKey: '', deepseekModel: 'claude-sonnet-4-20250514', deepseekTone: '', deepseekLength: 'medium',
@@ -2300,6 +2305,63 @@ async function cloudPut(path, value) {
 async function cloudGet(path) {
   try { const r = await fetch(firebaseUrl(path)); if (!r.ok) throw new Error('HTTP ' + r.status); return await r.json(); }
   catch (e) { console.warn('[Firebase read]', e.message); return null; }
+}
+async function cloudPutVerified(path, value) {
+  if (!await cloudPut(path, value)) return { ok: false, error: 'write failed' };
+  const readback = await cloudGet(path);
+  const same = JSON.stringify(readback) === JSON.stringify(value);
+  if (!same) { console.warn('[Firebase verify] readback mismatch at ' + path); return { ok: false, error: 'readback mismatch', readback }; }
+  return { ok: true, readback };
+}
+function canonicalEventId(ev) {
+  const raw = [ev?.sport || ev?.category || 'match', ev?.league?.id || ev?.league || '', ev?.id || ev?.name || '', ev?.startTime || ev?.date || ''].join('|');
+  let hash = 2166136261;
+  for (const ch of raw) { hash ^= ch.charCodeAt(0); hash = Math.imul(hash, 16777619); }
+  return 's803_' + (hash >>> 0).toString(16).padStart(8, '0');
+}
+function canonicalEventRecord(ev) {
+  const canonicalId = canonicalEventId(ev), legacyId = String(ev?.id || canonicalId).startsWith('auto_') ? String(ev.id) : 'auto_' + String(ev?.id || canonicalId);
+  const sources = Array.isArray(ev?.externalSources) ? ev.externalSources : [];
+  const providers = sources.filter(source => source?.url).map(source => ({
+    provider_name: source.source || source.type || 'unknown', provider_event_id: source.matchId || null,
+    provider_event_url: source.url, link_status: 'unverified', match_confidence: Number(source.matchConfidence || 0),
+    match_reason: source.matchReason || '', last_seen: new Date().toISOString()
+  }));
+  return {
+    id: legacyId, event_id: canonicalId, schema_version: 2,
+    title: ev?.title || ((ev?.home?.name || ev?.name || 'Sports event') + (ev?.away?.name ? ' vs ' + ev.away.name : '')),
+    sport: ev?.sport || ev?.category || '', category: ev?.category || ev?.sport || '',
+    league: ev?.league?.name || ev?.league || '', leagueId: ev?.league?.id || '',
+    homeName: ev?.home?.name || ev?.homeName || '', awayName: ev?.away?.name || ev?.awayName || '',
+    homeLogo: ev?.home?.logo || '', awayLogo: ev?.away?.logo || '',
+    kickoff: ev?.startTime || ev?.kickoff || ev?.date || null, startTime: ev?.startTime || ev?.kickoff || ev?.date || null,
+    statusType: ev?.status || ev?.statusType || 'STATUS_SCHEDULED', source: ev?.source || 'ESPN',
+    playerUrl: ev?.playerUrl || '', oneballId: ev?.oneballId || null, providers, updatedAt: new Date().toISOString()
+  };
+}
+async function syncCanonicalEventsToFirebase(events = allEvents) {
+  if (!CFG.firebaseDatabaseUrl || !CFG.firebaseEventsPath) { toast('Firebase URL and event path are required', 'w'); return { ok: false, written: 0 }; }
+  const rows = (Array.isArray(events) ? events : []).filter(ev => ev && (ev.id || ev.name));
+  if (!rows.length) { toast('Fetch events before syncing canonical records', 'w'); return { ok: false, written: 0 }; }
+  const status = document.getElementById('firebase-sync-status'); if (status) status.textContent = 'Syncing ' + rows.length + ' canonical event(s)…';
+  let written = 0, failed = 0;
+  for (const event of rows) {
+    const record = canonicalEventRecord(event), result = await cloudPutVerified(firebasePath(CFG.firebaseEventsPath || EVENT_FIREBASE_EVENTS_PATH) + '/' + record.id, record);
+    if (result.ok) written++; else { failed++; console.warn('[Firebase sync] ' + record.id + ': ' + result.error); }
+  }
+  const log = { action: 'canonical-event-sync', schema_version: 2, attempted: rows.length, written, failed, ts: Date.now() };
+  await cloudPut(firebasePath(EVENT_FIREBASE_SYNC_LOG_PATH) + '/' + log.ts, log);
+  if (status) status.textContent = 'Last sync: ' + written + '/' + rows.length + ' verified' + (failed ? ' · ' + failed + ' failed' : '');
+  toast('Canonical Firebase sync: ' + written + '/' + rows.length + ' verified' + (failed ? ' (' + failed + ' failed)' : '') , failed ? 'w' : 's');
+  return { ok: failed === 0, written, failed };
+}
+async function verifyFirebaseContract() {
+  const paths = [CFG.firebaseEventsPath || EVENT_FIREBASE_EVENTS_PATH, CFG.firebaseChannelsPath || EVENT_FIREBASE_CHANNELS_PATH, CFG.firebasePostLogPath || EVENT_FIREBASE_POST_LOG_PATH];
+  const results = await Promise.all(paths.map(async path => ({ path, data: await cloudGet(path) })));
+  const summary = results.map(result => result.path + ': ' + (result.data && typeof result.data === 'object' ? Object.keys(result.data).length + ' records' : result.data === null ? 'unavailable' : 'empty')).join(' · ');
+  const status = document.getElementById('firebase-sync-status'); if (status) status.textContent = 'Contract check: ' + summary;
+  toast('Firebase contract checked ✓', 's');
+  return results;
 }
 function queuePostLogCloudWrite(key, entry) {
   if (!CFG.firebaseDatabaseUrl || !CFG.firebasePostLogPath) return;
@@ -2381,11 +2443,12 @@ function loadAll() {
   CFG.firebaseEventsPath = CFG.firebaseEventsPath || EVENT_FIREBASE_EVENTS_PATH;
   CFG.firebaseChannelsPath = CFG.firebaseChannelsPath || EVENT_FIREBASE_CHANNELS_PATH;
   CFG.firebasePostLogPath = CFG.firebasePostLogPath || EVENT_FIREBASE_POST_LOG_PATH;
+  CFG.autoSyncFirebase = CFG.autoSyncFirebase === true;
   applyConfigToUI();
 }
 
 function persistCFG({ silent = false } = {}) {
-  CFG.blogId = v('cfg-blogid'); CFG.clientId = v('cfg-clientid') || EVENT_BUILTIN_CLIENT_ID; CFG.imgbbKey = v('cfg-imgbb'); CFG.ytApiKey = v('cfg-yt-key'); CFG.playerBase = normalizePlayerBaseUrl(v('cfg-player')); CFG.schedTiming = parseInt(document.getElementById('sched-timing')?.value || 60); CFG.schedStatus = document.getElementById('sched-def-status')?.value || 'DRAFT'; CFG.schedInterval = parseInt(document.getElementById('sched-interval')?.value || 300000); CFG.schedThumbs = document.getElementById('sched-thumbs')?.checked || false; CFG.mediaPlayerBase = normalizePlayerBaseUrl(v('cfg-media-player-base')); CFG.ppvtvMatchesApi = v('cfg-ppvtv-api') || CFG.ppvtvMatchesApi; CFG.firebaseDatabaseUrl = v('cfg-firebase-url') || EVENT_FIREBASE_DATABASE_URL; CFG.firebaseEventsPath = v('cfg-firebase-events-path') || EVENT_FIREBASE_EVENTS_PATH; CFG.firebaseChannelsPath = v('cfg-firebase-channels-path') || EVENT_FIREBASE_CHANNELS_PATH; CFG.firebasePostLogPath = v('cfg-firebase-post-log-path') || EVENT_FIREBASE_POST_LOG_PATH; CFG.autoFetchStreams = !!document.getElementById('cfg-auto-fetch-streams')?.checked; CFG.enableDdkanqu = !!document.getElementById('cfg-enable-ddkanqu')?.checked; CFG.enableOneTV = !!document.getElementById('cfg-enable-onetv')?.checked; CFG.enablePPVTV = document.getElementById('cfg-enable-ppvtv')?.checked ?? true; CFG.embedStreamsInPost = document.getElementById('cfg-embed-streams-in-post')?.checked ?? true; CFG.ddkanquMappingsRaw = v('cfg-ddkanqu-mappings'); CFG.deepseekKey = v('cfg-deepseek-key'); CFG.deepseekModel = document.getElementById('cfg-deepseek-model')?.value || CFG.deepseekModel; CFG.deepseekTone = v('cfg-deepseek-tone'); CFG.deepseekLength = document.getElementById('cfg-deepseek-length')?.value || CFG.deepseekLength; ddkanquMappings = parseDDKMappings(CFG.ddkanquMappingsRaw); saveAll(); updateClaudeStatus(); if (!silent) toast('Settings saved ✓', 's');
+  CFG.blogId = v('cfg-blogid'); CFG.clientId = v('cfg-clientid') || EVENT_BUILTIN_CLIENT_ID; CFG.imgbbKey = v('cfg-imgbb'); CFG.ytApiKey = v('cfg-yt-key'); CFG.playerBase = normalizePlayerBaseUrl(v('cfg-player')); CFG.schedTiming = parseInt(document.getElementById('sched-timing')?.value || 60); CFG.schedStatus = document.getElementById('sched-def-status')?.value || 'DRAFT'; CFG.schedInterval = parseInt(document.getElementById('sched-interval')?.value || 300000); CFG.schedThumbs = document.getElementById('sched-thumbs')?.checked || false; CFG.mediaPlayerBase = normalizePlayerBaseUrl(v('cfg-media-player-base')); CFG.ppvtvMatchesApi = v('cfg-ppvtv-api') || CFG.ppvtvMatchesApi; CFG.firebaseDatabaseUrl = v('cfg-firebase-url') || EVENT_FIREBASE_DATABASE_URL; CFG.firebaseEventsPath = v('cfg-firebase-events-path') || EVENT_FIREBASE_EVENTS_PATH; CFG.firebaseChannelsPath = v('cfg-firebase-channels-path') || EVENT_FIREBASE_CHANNELS_PATH; CFG.firebasePostLogPath = v('cfg-firebase-post-log-path') || EVENT_FIREBASE_POST_LOG_PATH; CFG.autoFetchStreams = !!document.getElementById('cfg-auto-fetch-streams')?.checked; CFG.autoSyncFirebase = !!document.getElementById('cfg-auto-sync-firebase')?.checked; CFG.enableDdkanqu = !!document.getElementById('cfg-enable-ddkanqu')?.checked; CFG.enableOneTV = !!document.getElementById('cfg-enable-onetv')?.checked; CFG.enablePPVTV = document.getElementById('cfg-enable-ppvtv')?.checked ?? true; CFG.embedStreamsInPost = document.getElementById('cfg-embed-streams-in-post')?.checked ?? true; CFG.ddkanquMappingsRaw = v('cfg-ddkanqu-mappings'); CFG.deepseekKey = v('cfg-deepseek-key'); CFG.deepseekModel = document.getElementById('cfg-deepseek-model')?.value || CFG.deepseekModel; CFG.deepseekTone = v('cfg-deepseek-tone'); CFG.deepseekLength = document.getElementById('cfg-deepseek-length')?.value || CFG.deepseekLength; ddkanquMappings = parseDDKMappings(CFG.ddkanquMappingsRaw); saveAll(); updateClaudeStatus(); if (!silent) toast('Settings saved ✓', 's');
 }
 
 function saveCFG() {
@@ -2405,6 +2468,7 @@ function saveCFG() {
   CFG.firebaseChannelsPath = v('cfg-firebase-channels-path') || EVENT_FIREBASE_CHANNELS_PATH;
   CFG.firebasePostLogPath = v('cfg-firebase-post-log-path') || EVENT_FIREBASE_POST_LOG_PATH;
   CFG.autoFetchStreams = document.getElementById('cfg-auto-fetch-streams')?.checked || false;
+  CFG.autoSyncFirebase = document.getElementById('cfg-auto-sync-firebase')?.checked || false;
   CFG.enableDdkanqu = document.getElementById('cfg-enable-ddkanqu')?.checked || false;
   CFG.enableOneTV = document.getElementById('cfg-enable-onetv')?.checked || false;
   CFG.enablePPVTV = document.getElementById('cfg-enable-ppvtv')?.checked ?? true;
@@ -3197,6 +3261,7 @@ async function fetchAllEvents() {
   updateSchedQueue();
   populateHLSelect();
   toast('✓ ' + allEvents.length + ' events loaded', 's');
+  if (CFG.autoSyncFirebase) await syncCanonicalEventsToFirebase(allEvents);
   if (CFG.autoFetchStreams) { toast('Loading external streams…', 'i'); await loadExternalStreams(); ddkanquMappings = parseDDKMappings(CFG.ddkanquMappingsRaw); }
 }
 
@@ -6366,6 +6431,7 @@ function applyConfigToUI() {
   set('cfg-firebase-post-log-path', CFG.firebasePostLogPath || EVENT_FIREBASE_POST_LOG_PATH);
   set('cfg-ddkanqu-mappings', CFG.ddkanquMappingsRaw || '');
   if (document.getElementById('cfg-auto-fetch-streams')) document.getElementById('cfg-auto-fetch-streams').checked = CFG.autoFetchStreams || false;
+  if (document.getElementById('cfg-auto-sync-firebase')) document.getElementById('cfg-auto-sync-firebase').checked = CFG.autoSyncFirebase === true;
   if (document.getElementById('cfg-enable-ddkanqu')) document.getElementById('cfg-enable-ddkanqu').checked = CFG.enableDdkanqu || false;
   if (document.getElementById('cfg-enable-onetv')) document.getElementById('cfg-enable-onetv').checked = CFG.enableOneTV || false;
   if (document.getElementById('cfg-enable-ppvtv')) document.getElementById('cfg-enable-ppvtv').checked = CFG.enablePPVTV !== false;

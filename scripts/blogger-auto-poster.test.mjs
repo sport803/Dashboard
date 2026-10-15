@@ -242,3 +242,82 @@ test('LiveTV iframe extraction prefers the permitted player and skips ad frames'
   const html = '<iframe src="//ads.livetv.example/ad.html"></iframe><iframe src="//emb.apl621.online/player/video.php?id=350296&amp;s=25b2w33u&amp;w=590&amp;h=384"></iframe>';
   assert.equal(extractLiveTVIframe(html), 'https://emb.apl621.online/player/video.php?id=350296&s=25b2w33u&w=590&h=384');
 });
+
+
+import {
+  normalizeTeam,
+  normalizeCompetition,
+  compareEvents,
+  matchProviderRecord,
+  mergeProviderRecord,
+  dedupeProviderRecords,
+  stableEventId
+} from './event-matching.mjs';
+
+test('matching engine resolves common team and competition aliases', () => {
+  assert.equal(normalizeTeam('Manchester United'), normalizeTeam('Man Utd'));
+  assert.equal(normalizeTeam('Paris Saint-Germain'), normalizeTeam('PSG'));
+  assert.equal(normalizeTeam('Internazionale'), normalizeTeam('Inter Milan'));
+  assert.equal(normalizeCompetition('UEFA Europa Conference League'), 'uefa conference league');
+  const result = compareEvents(
+    { sport: 'soccer', league: 'UEFA Europa Conference League', home: 'Manchester United', away: 'PSG', startTime: '2026-10-15T17:00:00Z' },
+    { sport: 'football', competition: 'UECL', home: 'Man Utd', away: 'Paris Saint-Germain', startTime: '2026-10-15T17:02:00Z' }
+  );
+  assert.equal(result.decision, 'auto');
+  assert.ok(result.score >= 90);
+  assert.match(result.reasons.join(' '), /Kickoff times are compatible|agree/);
+});
+
+test('matching engine rejects same teams from different competitions or sports', () => {
+  const result = compareEvents(
+    { sport: 'soccer', league: 'Premier League', home: 'Arsenal', away: 'Chelsea', startTime: '2026-10-15T17:00:00Z' },
+    { sport: 'basketball', competition: 'NBA', home: 'Arsenal', away: 'Chelsea', startTime: '2026-10-15T17:00:00Z' }
+  );
+  assert.equal(result.decision, 'unmatched');
+  assert.ok(result.conflicts.some(conflict => /Sport conflict|Competition conflict/.test(conflict)));
+});
+
+test('reversed home-away order needs explicit safe-match permission', () => {
+  const left = { sport: 'soccer', league: 'Premier League', home: 'Arsenal', away: 'Chelsea', startTime: '2026-10-15T17:00:00Z' };
+  const right = { sport: 'soccer', league: 'Premier League', home: 'Chelsea', away: 'Arsenal', startTime: '2026-10-15T17:02:00Z' };
+  assert.equal(compareEvents(left, right).decision, 'unmatched');
+  const allowed = compareEvents(left, right, { allowReversedOrder: true });
+  assert.equal(allowed.reversed, true);
+  assert.notEqual(allowed.decision, 'unmatched');
+});
+
+test('provider matcher returns the best candidate and exposes its evidence', () => {
+  const result = matchProviderRecord(
+    { provider: 'espn', providerEventId: 'espn-1', sport: 'soccer', competition: 'Premier League', home: 'Arsenal', away: 'Chelsea', startTime: '2026-10-15T17:00:00Z' },
+    [
+      { provider: 'oneball', providerEventId: 'one-1', sport: 'soccer', competition: 'Premier League', home: 'Arsenal', away: 'Chelsea', startTime: '2026-10-15T17:02:00Z' },
+      { provider: 'oneball', providerEventId: 'one-2', sport: 'soccer', competition: 'Champions League', home: 'Arsenal', away: 'Chelsea', startTime: '2026-10-15T17:02:00Z' }
+    ]
+  );
+  assert.equal(result.candidate.providerEventId, 'one-1');
+  assert.equal(result.comparison.decision, 'auto');
+  assert.ok(result.comparison.reasons.length >= 2);
+});
+
+test('canonical merge preserves multiple provider records and stable IDs', () => {
+  const first = { sport: 'soccer', competition: 'Premier League', home: 'Arsenal', away: 'Chelsea', kickoffUtc: '2026-10-15T17:00:00Z' };
+  const one = { provider: 'oneball', providerEventId: '77', providerEventUrl: 'https://oneball.live/live/77.html', home: 'Arsenal', away: 'Chelsea', kickoff: '2026-10-15T17:00:00Z' };
+  const two = { provider: 'xoilac', providerEventId: 'xo-77', providerEventUrl: 'https://xoilac.example/a', home: 'Arsenal', away: 'Chelsea', kickoff: '2026-10-15T17:01:00Z' };
+  const firstMatch = compareEvents(first, one, { autoThreshold: 50 });
+  const secondMatch = compareEvents(first, two, { autoThreshold: 50 });
+  const merged = mergeProviderRecord(mergeProviderRecord(first, one, firstMatch), two, secondMatch);
+  assert.equal(merged.providers.length, 2);
+  assert.equal(merged.event_id, stableEventId(first));
+  assert.ok(merged.providers.every(provider => provider.match_reason));
+});
+
+test('duplicate provider records collapse only when the same provider event ID is present', () => {
+  const records = [
+    { provider: 'oneball', providerEventId: '77', home: 'Arsenal', away: 'Chelsea' },
+    { provider: 'oneball', providerEventId: '77', home: 'Arsenal', away: 'Chelsea' },
+    { provider: 'oneball', providerEventId: '78', home: 'Arsenal', away: 'Chelsea' }
+  ];
+  const deduped = dedupeProviderRecords(records, { autoThreshold: 50 });
+  assert.equal(deduped.length, 2);
+  assert.equal(deduped.filter(record => record.duplicate_of).length, 1);
+});

@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import sharp from 'sharp';
+import { matchProviderRecord } from './event-matching.mjs';
 
 // ============================================================================
 // CONFIG
@@ -413,9 +414,17 @@ function buildFeedIndex(entries) {
  * keys alone would lose matches like "Manchester United" vs "Man United" (teamsMatch uses substring/token rules).
  */
 function findFeedMatch(index, entries, event) {
-  const home = teamKey(homeName(event)), away = teamKey(awayName(event));
-  const exact = home && away ? index.get(`${home}|${away}`) : undefined;
-  return exact || entries.find(entry => pairMatch(event, entry.home, entry.away));
+  const candidates = entries.filter(entry => pairMatch(event, entry.home, entry.away));
+  if (!candidates.length) return null;
+  const match = matchProviderRecord(event, candidates.map(entry => ({ ...entry, provider: entry.provider || entry.source, providerEventId: entry.providerEventId || entry.id })), {
+    // OneBall/Xoilac feeds frequently omit kickoff and competition metadata. A unique
+    // exact team pair is still safe enough for a provider link, but is recorded as review-level evidence.
+    allowReversedOrder: true, reversedMinimumScore: 35, autoThreshold: 90, reviewThreshold: 35, kickoffToleranceMinutes: 180
+  });
+  if (!match.candidate || match.comparison.conflicts.some(conflict => /Sport conflict|Competition conflict|Kickoff times conflict|not sufficiently/i.test(conflict))) return null;
+  const tied = match.alternatives.find(alternative => alternative.comparison.score === match.comparison.score);
+  if (tied) return null;
+  return { ...match.candidate, _match: match.comparison };
 }
 function parseXoilacLinks(html) {
   const links = new Map();
@@ -455,11 +464,9 @@ async function attachExternalSources(events, feeds) {
     if (event.type !== 'match') return { ...event, externalSources: [] };
     const sources = [];
     const one = findFeedMatch(oneIndex, oneball, event);
-    const xoilacMatch = xoilacIndex.get(`${teamKey(homeName(event))}|${teamKey(awayName(event))}`) && xoilacPairMatch(event, xoilacIndex.get(`${teamKey(homeName(event))}|${teamKey(awayName(event))}`))
-      ? xoilacIndex.get(`${teamKey(homeName(event))}|${teamKey(awayName(event))}`)
-      : xoilac.find(entry => xoilacPairMatch(event, entry));
-    if (one) sources.push({ url: oneBallUrl(one.id), type: 'one', source: 'onetv', matchId: String(one.id), home: one.home, away: one.away });
-    if (xoilacMatch) sources.push({ url: xoilacMatch.url, type: 'xoilac', source: 'xoilac', home: xoilacMatch.home, away: xoilacMatch.away });
+    const xoilacMatch = findFeedMatch(xoilacIndex, xoilac.filter(entry => xoilacPairMatch(event, entry)), event);
+    if (one) sources.push({ url: oneBallUrl(one.id), type: 'one', source: 'onetv', matchId: String(one.id), home: one.home, away: one.away, matchConfidence: one._match?.score || 0, matchReason: one._match?.reasons?.join(' ') || '' });
+    if (xoilacMatch) sources.push({ url: xoilacMatch.url, type: 'xoilac', source: 'xoilac', home: xoilacMatch.home, away: xoilacMatch.away, matchConfidence: xoilacMatch._match?.score || 0, matchReason: xoilacMatch._match?.reasons?.join(' ') || '' });
     // oneballId is populated here (instead of deleting the branch in replayLinks) so the replay URL feature keeps working.
     return { ...event, externalSources: uniqueByUrl(sources), ...(one ? { oneballId: String(one.id) } : {}) };
   });
