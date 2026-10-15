@@ -42,7 +42,7 @@ const LOGO_MISS_TTL_MS = 24 * 60 * 60 * 1000; // lookup succeeded, no badge: 1 d
 const LOGO_ERROR_TTL_MS = 5 * 60 * 1000; // lookup failed: 5 minutes
 
 const DASHBOARD_LEAGUES = [
-  ['ucl', 'soccer', 'uefa.champions', 'Champions League', 'match'], ['uwcl', 'soccer', 'uefa.wchampions', "UEFA Women's Champions League", 'match'], ['uel', 'soccer', 'uefa.europa', 'Europa League', 'match'],
+  ['ucl', 'soccer', 'uefa.champions', 'Champions League', 'match'], ['uwcl', 'soccer', 'uefa.wchampions', "UEFA Women's Champions League", 'match'], ['uel', 'soccer', 'uefa.europa', 'Europa League', 'match'], ['uecl', 'soccer', 'uefa.europa.conf', 'UEFA Conference League', 'match'],
   ['epl', 'soccer', 'eng.1', 'Premier League', 'match'], ['laliga', 'soccer', 'esp.1', 'La Liga', 'match'], ['seriea', 'soccer', 'ita.1', 'Serie A', 'match'], ['bundesliga', 'soccer', 'ger.1', 'Bundesliga', 'match'], ['ligue1', 'soccer', 'fra.1', 'Ligue 1', 'match'], ['mls', 'soccer', 'usa.1', 'MLS', 'match'],
   ['worldcup', 'soccer', 'fifa.world', 'FIFA World Cup', 'match'], ['euro', 'soccer', 'uefa.euro', 'UEFA Euro', 'match'], ['afconqual', 'soccer', 'caf.nations_qual', 'Africa Cup of Nations Qualifiers', 'match'], ['euroqual', 'soccer', 'uefa.euroq', 'UEFA Euro Qualifiers', 'match'], ['concacafnl', 'soccer', 'concacaf.nations.league', 'Concacaf Nations League', 'match'], ['nations', 'soccer', 'uefa.nations', 'UEFA Nations League', 'match'], ['intlfriendly', 'soccer', 'fifa.friendly', 'Intl Friendlies', 'match'],
   ['nba', 'basketball', 'nba', 'NBA', 'match'], ['wnba', 'basketball', 'wnba', "Women's National Basketball Association", 'match'], ['nfl', 'football', 'nfl', 'NFL', 'match'], ['nhl', 'hockey', 'nhl', 'NHL', 'match'],
@@ -58,7 +58,8 @@ const LEAGUE_ALIASES = [
   ['porsche-carrera-cup', /porsche\s*carrera\s*cup/i],
   ['f1', /formula\s*1|\bf1\b|grand prix/i],
   ['pga', /pga tour/i],
-  ['cycling', /cycling|tour de france|giro d.?italia|vuelta/i]
+  ['cycling', /cycling|tour de france|giro d.?italia|vuelta/i],
+  ['uecl', /conference league|uefa.europa.conf|uecl/i]
 ];
 
 const SPORT_LABELS = {

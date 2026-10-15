@@ -69,7 +69,7 @@ Create or edit the repository variable `AUTO_POST_LEAGUES` under **Settings → 
 epl,f1,motogp,nascar,wrc,imsa,porsche-carrera-cup
 ```
 
-Use the Dashboard league IDs where possible. The worker also recognizes league names and aliases such as Formula 1, MotoGP, NASCAR, WRC, IMSA, and Porsche Carrera Cup. This setting is independent of the Dashboard browser's local `activeLeagues` setting, because browser localStorage is not available inside GitHub Actions.
+Use the Dashboard league IDs where possible, including `uecl` for UEFA Conference League. The worker also recognizes league names and aliases such as Formula 1, MotoGP, NASCAR, WRC, IMSA, Porsche Carrera Cup, and UEFA Conference League. This setting is independent of the Dashboard browser's local `activeLeagues` setting, because browser localStorage is not available inside GitHub Actions.
 
 The refresh token is required because GitHub Actions does not have a browser session. Do not commit it to the repository or place it in `index.html`.
 

@@ -34,8 +34,7 @@ on:
         default: 'false'
         type: boolean
   schedule:
-    # 06:00 Africa/Nairobi (03:00 UTC). Scheduled runs publish the previous local day.
-    - cron: '0 3 * * *'
+    - cron: '*/5 * * * *'
 
 permissions:
   contents: read
@@ -82,19 +81,11 @@ jobs:
         id: run-date
         if: steps.credentials.outputs.ready == 'true'
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          EVENT_TIMEZONE: ${{ vars.EVENT_TIMEZONE }}
           INPUT_DATE: ${{ inputs.event_date }}
           INPUT_DATE_ONLY: ${{ inputs.event_date_only }}
         run: |
-          timezone="${EVENT_TIMEZONE:-Africa/Nairobi}"
-          if [ "$EVENT_NAME" = "schedule" ]; then
-            echo "event_date=$(TZ="$timezone" date -d 'yesterday' +%F)" >> "$GITHUB_OUTPUT"
-            echo "event_date_only=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "event_date=$INPUT_DATE" >> "$GITHUB_OUTPUT"
-            echo "event_date_only=${INPUT_DATE_ONLY:-false}" >> "$GITHUB_OUTPUT"
-          fi
+          echo "event_date=$INPUT_DATE" >> "$GITHUB_OUTPUT"
+          echo "event_date_only=${INPUT_DATE_ONLY:-false}" >> "$GITHUB_OUTPUT"
 
       - name: Run Blogger event publisher
         if: steps.credentials.outputs.ready == 'true'
