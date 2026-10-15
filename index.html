@@ -2327,7 +2327,7 @@ function canonicalEventRecord(ev) {
     provider_event_url: source.url, link_status: 'unverified', match_confidence: Number(source.matchConfidence || 0),
     match_reason: source.matchReason || '', last_seen: new Date().toISOString()
   }));
-  return {
+  const record = {
     id: legacyId, event_id: canonicalId, schema_version: 2,
     title: ev?.title || ((ev?.home?.name || ev?.name || 'Sports event') + (ev?.away?.name ? ' vs ' + ev.away.name : '')),
     sport: ev?.sport || ev?.category || '', category: ev?.category || ev?.sport || '',
@@ -2336,8 +2336,11 @@ function canonicalEventRecord(ev) {
     homeLogo: ev?.home?.logo || '', awayLogo: ev?.away?.logo || '',
     kickoff: ev?.startTime || ev?.kickoff || ev?.date || null, startTime: ev?.startTime || ev?.kickoff || ev?.date || null,
     statusType: ev?.status || ev?.statusType || 'STATUS_SCHEDULED', source: ev?.source || 'ESPN',
-    playerUrl: ev?.playerUrl || '', oneballId: ev?.oneballId || null, providers, updatedAt: new Date().toISOString()
+    playerUrl: ev?.playerUrl || '', updatedAt: new Date().toISOString()
   };
+  if (ev?.oneballId) record.oneballId = ev.oneballId;
+  if (providers.length) record.providers = providers;
+  return record;
 }
 async function syncCanonicalEventsToFirebase(events = allEvents) {
   if (!CFG.firebaseDatabaseUrl || !CFG.firebaseEventsPath) { toast('Firebase URL and event path are required', 'w'); return { ok: false, written: 0 }; }
