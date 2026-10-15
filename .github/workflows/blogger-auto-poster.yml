@@ -34,7 +34,8 @@ on:
         default: 'false'
         type: boolean
   schedule:
-    - cron: '*/5 * * * *'
+    # 06:00 Africa/Nairobi (03:00 UTC). Scheduled runs publish the previous local day.
+    - cron: '0 3 * * *'
 
 permissions:
   contents: read
@@ -77,6 +78,24 @@ jobs:
         if: steps.credentials.outputs.ready == 'true'
         run: npm ci --no-audit --no-fund
 
+      - name: Determine publishing date
+        id: run-date
+        if: steps.credentials.outputs.ready == 'true'
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_TIMEZONE: ${{ vars.EVENT_TIMEZONE }}
+          INPUT_DATE: ${{ inputs.event_date }}
+          INPUT_DATE_ONLY: ${{ inputs.event_date_only }}
+        run: |
+          timezone="${EVENT_TIMEZONE:-Africa/Nairobi}"
+          if [ "$EVENT_NAME" = "schedule" ]; then
+            echo "event_date=$(TZ="$timezone" date -d 'yesterday' +%F)" >> "$GITHUB_OUTPUT"
+            echo "event_date_only=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "event_date=$INPUT_DATE" >> "$GITHUB_OUTPUT"
+            echo "event_date_only=${INPUT_DATE_ONLY:-false}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run Blogger event publisher
         if: steps.credentials.outputs.ready == 'true'
         env:
@@ -87,8 +106,8 @@ jobs:
           IMGBB_API_KEY: ${{ secrets.IMGBB_API_KEY }}
           EVENT_TIMEZONE: ${{ vars.EVENT_TIMEZONE }}
           AUTO_POST_LEAGUES: ${{ inputs.league_filter || vars.AUTO_POST_LEAGUES }}
-          EVENT_DATE: ${{ inputs.event_date }}
-          EVENT_DATE_ONLY: ${{ inputs.event_date_only }}
+          EVENT_DATE: ${{ steps.run-date.outputs.event_date }}
+          EVENT_DATE_ONLY: ${{ steps.run-date.outputs.event_date_only }}
           FORCE_UPDATE: ${{ inputs.force_update }}
           ENRICH_PLAYER_DATA: ${{ vars.ENRICH_PLAYER_DATA }}
           SUPERSPORT_HIGHLIGHTS: ${{ vars.SUPERSPORT_HIGHLIGHTS }}
