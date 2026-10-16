@@ -115,6 +115,16 @@ if (function_exists('imagecreatetruecolor') && function_exists('imagettftext')) 
     $dimensions = $GLOBALS['s803_test_upload'] ? @getimagesize($GLOBALS['s803_test_upload']) : false;
     check(!is_wp_error($image) && !empty($image['url']) && $dimensions && $dimensions[0] === 1200 && $dimensions[1] === 675, 'GD featured thumbnail renders a valid 1200×675 PNG');
     if ($GLOBALS['s803_test_upload'] && is_file($GLOBALS['s803_test_upload'])) { unlink($GLOBALS['s803_test_upload']); }
+    $normalizer = new ReflectionMethod('S803_Thumbnail_Generator', 'gd_safe_text');
+    $normalizer->setAccessible(true);
+    $safe_text = $normalizer->invoke(null, 'São Paulo — 東京 ⚽');
+    check($safe_text !== '' && !preg_match('/[^\x20-\x7E]/', $safe_text), 'thumbnail labels are converted to FreeType-safe ASCII');
+    $gd_warnings = array();
+    set_error_handler(function ($severity, $message) use (&$gd_warnings) { $gd_warnings[] = $message; return true; }, E_WARNING);
+    $unicode_image = S803_Thumbnail_Generator::ensure(6, array('key' => 'unicode|12345', 'type' => 'match', 'home' => array('name' => 'São Paulo — 東京'), 'away' => array('name' => 'München ⚽'), 'league_name' => 'Liga de Campeões — 北京', 'start_utc' => time()), false);
+    restore_error_handler();
+    check(!is_wp_error($unicode_image) && !$gd_warnings, 'Unicode event text generates a thumbnail without GD warnings');
+    if ($GLOBALS['s803_test_upload'] && is_file($GLOBALS['s803_test_upload'])) { unlink($GLOBALS['s803_test_upload']); }
 } else { echo "GD/FreeType unavailable; thumbnail rendering skipped.\n"; }
 
 echo "WordPress autopilot smoke tests passed.\n";
