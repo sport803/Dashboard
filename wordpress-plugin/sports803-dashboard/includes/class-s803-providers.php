@@ -120,6 +120,60 @@ final class S803_ESPN_Provider {
         );
     }
 
+    public static function player_facts($summary, $event) {
+        $competition = isset($summary['header']['competitions'][0]) ? $summary['header']['competitions'][0] : array();
+        $teams = array('home' => array('name' => $event['home']['name'], 'starters' => array(), 'scorers' => array(), 'cards' => array(), 'substitutions' => array()), 'away' => array('name' => $event['away']['name'], 'starters' => array(), 'scorers' => array(), 'cards' => array(), 'substitutions' => array()));
+        $team_sides = array();
+        foreach ((array) (isset($competition['competitors']) ? $competition['competitors'] : array()) as $competitor) {
+            $side = isset($competitor['homeAway']) && $competitor['homeAway'] === 'away' ? 'away' : 'home';
+            if (!empty($competitor['id'])) { $team_sides[(string) $competitor['id']] = $side; }
+            if (!empty($competitor['team']['id'])) { $team_sides[(string) $competitor['team']['id']] = $side; }
+        }
+        foreach ((array) (isset($summary['rosters']) ? $summary['rosters'] : (isset($summary['lineups']) ? $summary['lineups'] : array())) as $roster) {
+            $team_id = isset($roster['team']['id']) ? (string) $roster['team']['id'] : (isset($roster['teamId']) ? (string) $roster['teamId'] : '');
+            $side = isset($roster['homeAway']) && $roster['homeAway'] === 'away' ? 'away' : (isset($team_sides[$team_id]) ? $team_sides[$team_id] : '');
+            if (!$side) { continue; }
+            $players = isset($roster['roster']) ? $roster['roster'] : (isset($roster['players']) ? $roster['players'] : (isset($roster['athletes']) ? $roster['athletes'] : array()));
+            foreach ((array) $players as $row) {
+                $athlete = isset($row['athlete']) ? $row['athlete'] : $row;
+                $name = isset($athlete['displayName']) ? $athlete['displayName'] : (isset($athlete['fullName']) ? $athlete['fullName'] : (isset($athlete['name']) ? $athlete['name'] : ''));
+                $starter = !empty($row['starter']) || (isset($row['type']['text']) && stripos($row['type']['text'], 'starter') !== false) || (isset($row['status']['description']) && stripos($row['status']['description'], 'starter') !== false);
+                if ($name && $starter && count($teams[$side]['starters']) < 25) { $teams[$side]['starters'][] = array('name' => sanitize_text_field($name)); }
+            }
+        }
+        $plays = isset($summary['keyEvents']) ? $summary['keyEvents'] : (isset($summary['plays']) ? $summary['plays'] : array());
+        foreach ((array) $plays as $play) {
+            $type = strtolower((string) (isset($play['type']['text']) ? $play['type']['text'] : (isset($play['type']['name']) ? $play['type']['name'] : '')));
+            $description = (string) (isset($play['text']) ? $play['text'] : (isset($play['description']) ? $play['description'] : ''));
+            $combined = strtolower($type . ' ' . $description);
+            $team_id = isset($play['team']['id']) ? (string) $play['team']['id'] : (isset($play['teamId']) ? (string) $play['teamId'] : '');
+            $side = isset($team_sides[$team_id]) ? $team_sides[$team_id] : '';
+            if (!$side) { continue; }
+            $participants = isset($play['participants']) ? (array) $play['participants'] : array();
+            $player = '';
+            $assist = '';
+            foreach ($participants as $index => $participant) {
+                $athlete = isset($participant['athlete']) ? $participant['athlete'] : $participant;
+                $name = isset($athlete['displayName']) ? $athlete['displayName'] : (isset($athlete['fullName']) ? $athlete['fullName'] : '');
+                if ($name && $player === '') { $player = $name; } elseif ($name && $assist === '') { $assist = $name; }
+            }
+            if (!$player) { $player = trim(preg_replace('/\s+/u', ' ', wp_strip_all_tags($description))); }
+            $clock = isset($play['clock']['displayValue']) ? (string) $play['clock']['displayValue'] : (isset($play['clock']) && is_string($play['clock']) ? $play['clock'] : '');
+            if (preg_match('/goal|penalty scored|touchdown|home run|try|score/', $combined) && $player) {
+                if (count($teams[$side]['scorers']) < 20) { $teams[$side]['scorers'][] = array('player' => sanitize_text_field($player), 'assist' => sanitize_text_field($assist), 'minute' => sanitize_text_field($clock)); }
+            } elseif (preg_match('/yellow card|red card|booking/', $combined) && $player) {
+                if (count($teams[$side]['cards']) < 20) { $teams[$side]['cards'][] = array('player' => sanitize_text_field($player), 'minute' => sanitize_text_field($clock)); }
+            } elseif (preg_match('/substitution|substituted/', $combined) && $player) {
+                if (count($teams[$side]['substitutions']) < 20) { $teams[$side]['substitutions'][] = array('player' => sanitize_text_field($player), 'minute' => sanitize_text_field($clock)); }
+            }
+        }
+        $has_facts = false;
+        foreach (array('home', 'away') as $side) {
+            foreach (array('starters', 'scorers', 'cards', 'substitutions') as $field) { if ($teams[$side][$field]) { $has_facts = true; } }
+        }
+        return $has_facts ? array('complete' => !empty($summary['rosters']) || !empty($summary['lineups']), 'home' => $teams['home'], 'away' => $teams['away'], 'updated_at' => time()) : array();
+    }
+
     public static function parse_event($raw, $league) {
         if (empty($raw['id']) || empty($raw['date'])) { return null; }
         $competition = !empty($raw['competitions'][0]) ? $raw['competitions'][0] : array();
@@ -181,7 +235,7 @@ final class S803_ESPN_Provider {
 
 final class S803_OneBall_Provider implements S803_Highlight_Provider {
     const FEED_URL = 'https://oneball.live/list.json';
-    const PLAYER_URL = 'https://www.sport803.online/p/player.html';
+    const PLAYER_URL = 'https://sport803.github.io/player/';
 
     public function key() { return 'oneball'; }
 
@@ -189,24 +243,29 @@ final class S803_OneBall_Provider implements S803_Highlight_Provider {
         $cache_key = 's803_oneball_feed';
         $cached = get_transient($cache_key);
         if (is_array($cached)) { return $cached; }
-        $response = wp_remote_get(self::FEED_URL, array('timeout' => 10, 'redirection' => 3, 'headers' => array('Accept' => 'application/json', 'User-Agent' => 'Sports803-WordPress-Autopilot/' . S803_PLUGIN_VERSION)));
-        if (is_wp_error($response)) { return $response; }
-        $status = (int) wp_remote_retrieve_response_code($response);
-        if ($status < 200 || $status >= 300) { return new WP_Error('s803_oneball_http', 'OneBall feed returned HTTP ' . $status, array('status' => $status)); }
-        $data = json_decode(wp_remote_retrieve_body($response), true);
-        if (!is_array($data)) { return new WP_Error('s803_oneball_json', 'OneBall feed returned invalid JSON.'); }
-        $entries = isset($data['matches']) ? $data['matches'] : (isset($data['data']) ? $data['data'] : (isset($data['list']) ? $data['list'] : $data));
-        if (!is_array($entries)) { $entries = array(); }
-        $normalized = array();
-        foreach ($entries as $entry) {
-            if (!is_array($entry)) { continue; }
-            $id = isset($entry['nami_id']) ? $entry['nami_id'] : (isset($entry['id']) ? $entry['id'] : '');
-            $home = isset($entry['home_team']) ? $entry['home_team'] : (isset($entry['home_team_name']) ? $entry['home_team_name'] : (isset($entry['home']['name']) ? $entry['home']['name'] : (isset($entry['home']) ? $entry['home'] : '')));
-            $away = isset($entry['away_team']) ? $entry['away_team'] : (isset($entry['away_team_name']) ? $entry['away_team_name'] : (isset($entry['away']['name']) ? $entry['away']['name'] : (isset($entry['away']) ? $entry['away'] : '')));
-            if ($id !== '' && is_string($home) && is_string($away)) { $normalized[] = array('id' => (string) $id, 'home' => $home, 'away' => $away); }
+        $urls = array(self::FEED_URL, 'https://corsproxy.io/?' . rawurlencode(self::FEED_URL), 'https://api.allorigins.win/raw?url=' . rawurlencode(self::FEED_URL));
+        $last_error = '';
+        foreach ($urls as $url) {
+            $response = wp_remote_get($url, array('timeout' => 10, 'redirection' => 3, 'limit_response_size' => 1500000, 'headers' => array('Accept' => 'application/json', 'User-Agent' => 'Mozilla/5.0 (compatible; Sports803-Autopilot/' . S803_PLUGIN_VERSION . ')')));
+            if (is_wp_error($response)) { $last_error = $response->get_error_message(); continue; }
+            $status = (int) wp_remote_retrieve_response_code($response);
+            if ($status < 200 || $status >= 300) { $last_error = 'HTTP ' . $status; continue; }
+            $data = json_decode(wp_remote_retrieve_body($response), true);
+            if (!is_array($data)) { $last_error = 'OneBall feed returned invalid JSON.'; continue; }
+            $entries = isset($data['matches']) ? $data['matches'] : (isset($data['data']) ? $data['data'] : (isset($data['list']) ? $data['list'] : $data));
+            if (!is_array($entries)) { $entries = array(); }
+            $normalized = array();
+            foreach ($entries as $entry) {
+                if (!is_array($entry)) { continue; }
+                $id = isset($entry['nami_id']) ? $entry['nami_id'] : (isset($entry['id']) ? $entry['id'] : '');
+                $home = isset($entry['home_team']) ? $entry['home_team'] : (isset($entry['home_team_name']) ? $entry['home_team_name'] : (isset($entry['home']['name']) ? $entry['home']['name'] : (isset($entry['home']) ? $entry['home'] : '')));
+                $away = isset($entry['away_team']) ? $entry['away_team'] : (isset($entry['away_team_name']) ? $entry['away_team_name'] : (isset($entry['away']['name']) ? $entry['away']['name'] : (isset($entry['away']) ? $entry['away'] : '')));
+                if ($id !== '' && is_string($home) && is_string($away)) { $normalized[] = array('id' => (string) $id, 'home' => $home, 'away' => $away); }
+            }
+            set_transient($cache_key, $normalized, 240);
+            return $normalized;
         }
-        set_transient($cache_key, $normalized, 240);
-        return $normalized;
+        return new WP_Error('s803_oneball_unavailable', $last_error ?: 'OneBall feed is unavailable.');
     }
 
     public function find_verified_replay($event, $feed) {
