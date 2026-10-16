@@ -85,3 +85,16 @@ The existing dashboard UI still supports interactive Google sign-in, manual post
 
 
 Optional Actions variable: `LIVETV_HIGHLIGHTS` enables the LiveTV.sx replay fallback; set it to `0` to disable it.
+
+
+## WordPress plugin port
+
+An installable plugin package is maintained under `wordpress-plugin/sports803-dashboard/`. It embeds the dashboard with `[sports803_dashboard]` and offers a separate WordPress admin page for Blogger credentials and an opt-in WP-Cron autopilot. The autopilot continues publishing to Blogger; it does not convert the destination to WordPress posts. See the plugin README for installation, settings, and feature-parity notes.
+
+Build an uploadable ZIP with:
+
+```bash
+bash scripts/build-wordpress-plugin.sh
+```
+
+The plugin is **off by default**. WordPress Cron is traffic-triggered, so a hosting/server cron should request `wp-cron.php` every five minutes for reliable timing. Keep the GitHub Actions schedule active until the plugin is installed and verified; disable that schedule before enabling WordPress autopilot to avoid concurrent publishers. WordPress credentials must be entered in the plugin settings; GitHub Actions secrets are not automatically transferred.
