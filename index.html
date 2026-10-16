@@ -4755,7 +4755,7 @@ function addOneBallEntry(entry) {
   const away = zhToEn(oneBallTeamName(entry?.away_team || entry?.away_team_name || entry?.away || entry?.awayName || ''));
   if (!matchId || !home || !away) return null;
   const key = pairKey(home, away);
-  const liveUrl = 'https://oneball.live/live/' + matchId + '.html';
+  const liveUrl = 'https://oneball.live/live/' + matchId + '.htm';
   const signals = Array.isArray(entry.signals) ? entry.signals : [];
   // Always use the stable OneBall match page. Direct signal URLs expire and must
   // never be embedded in generated posts or passed to the Sports 803 player.
@@ -4902,7 +4902,7 @@ function debugOneBallMatch(homeName, awayName) {
   console.log('oneTVHomeMap[key]:', sources.length ? sources : '(missing)');
   console.log('raw list.json entry:', entry || '(missing)');
   if (entry?.nami_id) {
-    const liveUrl = 'https://oneball.live/live/' + entry.nami_id + '.html';
+    const liveUrl = 'https://oneball.live/live/' + entry.nami_id + '.htm';
     fetchOneBallPage(liveUrl, 10000).then(html => console.log('live page:', liveUrl, { exists: !!html, streamUrl: extractOneBallStream(html, liveUrl) || '(none)' })).catch(error => console.warn('live page check failed:', error.message));
   } else console.log('live page: no match ID available');
   console.groupEnd();
@@ -5036,7 +5036,7 @@ function canonicalOneBallLiveUrl(url) {
     const parsed = new URL(raw, 'https://oneball.live');
     const parts = parsed.pathname.split('/').filter(Boolean);
     const id = (parts.pop() || '').replace(/\.html?$/i, '');
-    if (/^\d+$/.test(id)) return 'https://oneball.live/live/' + id + '.html';
+    if (/^\d+$/.test(id)) return 'https://oneball.live/live/' + id + '.htm';
     raw = parsed.href;
   } catch (e) {}
   return raw.replace(/\/\/+/g, '/').replace('https:/', 'https://');
@@ -5044,7 +5044,7 @@ function canonicalOneBallLiveUrl(url) {
 function oneBallUrlFor(matchId, kind = 'live') {
   const id = String(matchId || '').replace(/\.html?$/i, '');
   if (!/^\d+$/.test(id)) return '';
-  return 'https://oneball.live/' + (kind === 'replay' ? 'replay' : 'live') + '/' + id + '.html';
+  return 'https://oneball.live/' + (kind === 'replay' ? 'replay' : 'live') + '/' + id + '.htm';
 }
 function oneBallPlayerUrl(matchId, kind = 'live') {
   const page = /^https?:\/\//i.test(String(matchId || '')) ? String(matchId).split('?')[0] : oneBallUrlFor(matchId, kind);
@@ -5056,7 +5056,7 @@ function canonicalOneBallReplayUrl(url) {
     const parsed = new URL(raw, 'https://oneball.live');
     const parts = parsed.pathname.split('/').filter(Boolean);
     const id = (parts.pop() || '').replace(/\.html?$/i, '');
-    if (/^\d+$/.test(id)) return 'https://oneball.live/replay/' + id + '.html';
+    if (/^\d+$/.test(id)) return 'https://oneball.live/replay/' + id + '.htm';
     raw = parsed.href;
   } catch (e) {}
   return raw.replace(/\/\/+/, '/').replace('https:/', 'https://');

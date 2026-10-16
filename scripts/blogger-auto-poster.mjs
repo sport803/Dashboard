@@ -86,7 +86,6 @@ function eventTimeZone() { return process.env.EVENT_TIMEZONE || 'Africa/Nairobi'
  * DRY_RUN=1 only needs the blog ID (no writes happen, so no Google/ImgBB credentials).
  */
 const ENV_NAMES = {
-  blogId: ['BLOGGER_BLOG_ID', 'BLOG_ID'],
   clientId: ['BLOGGER_GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_ID'],
   clientSecret: ['BLOGGER_GOOGLE_CLIENT_SECRET', 'GOOGLE_CLIENT_SECRET'],
   refreshToken: ['BLOGGER_REFRESH_TOKEN'],
@@ -95,12 +94,14 @@ const ENV_NAMES = {
 function loadConfig(env = process.env) {
   const dryRun = env.DRY_RUN === '1';
   const read = (field) => ENV_NAMES[field].map(name => text(env[name])).find(Boolean) || '';
-  const needed = dryRun ? ['blogId'] : Object.keys(ENV_NAMES);
+  const blogIds = [...new Set(text(env.BLOGGER_BLOG_IDS || env.BLOGGER_BLOG_ID || env.BLOG_ID).split(',').map(id => id.trim()).filter(Boolean))];
+  const needed = dryRun ? [] : Object.keys(ENV_NAMES);
   const missing = needed.filter(field => !read(field)).map(field => ENV_NAMES[field][0]);
+  if (!blogIds.length) missing.push('BLOGGER_BLOG_IDS (or legacy BLOGGER_BLOG_ID)');
   if (missing.length) throw new Error(`Missing required environment variable(s): ${missing.join(', ')}`);
   const timeZone = text(env.EVENT_TIMEZONE) || 'Africa/Nairobi';
   try { new Intl.DateTimeFormat('en-US', { timeZone }); } catch { throw new Error(`Invalid EVENT_TIMEZONE: "${timeZone}"`); }
-  return { dryRun, timeZone, blogId: read('blogId'), clientId: read('clientId'), clientSecret: read('clientSecret'), refreshToken: read('refreshToken'), imgbbKey: read('imgbbKey') };
+  return { dryRun, timeZone, blogIds, blogId: blogIds[0], clientId: read('clientId'), clientSecret: read('clientSecret'), refreshToken: read('refreshToken'), imgbbKey: read('imgbbKey') };
 }
 
 // ============================================================================
@@ -365,7 +366,7 @@ function xoilacPairMatch(event, entry) {
 
 function oneBallUrl(matchId, mode = 'live') {
   const route = mode === 'replay' ? 'replay' : 'live';
-  return `https://oneball.live/${route}/${encodeURIComponent(String(matchId).replace(/\.html?$/i, ''))}.html`;
+  return `https://oneball.live/${route}/${encodeURIComponent(String(matchId).replace(/\.html?$/i, ''))}.htm`;
 }
 function normalizePlayerUrlsInHtml(html) {
   return String(html || '').replace(/((?:https?:\/\/)[^"'<>\s]+\/player\.html)\/+\?/gi, '$1?');
@@ -735,7 +736,8 @@ function rewriteOneBallReplayIframes(content) {
       if (!/^(?:www\.)?sport803\.online$/i.test(playerUrl.hostname) || playerUrl.pathname.toLowerCase() !== '/p/player.html' || !/oneball\.live/i.test(src)) return attribute;
       const replaySrc = src
         .replace(/(https?:\/\/oneball\.live\/)live\//gi, '$1replay/')
-        .replace(/(https?%3A%2F%2Foneball\.live%2F)live%2F/gi, '$1replay%2F');
+        .replace(/(https?%3A%2F%2Foneball\.live%2F)live%2F/gi, '$1replay%2F')
+        .replace(/\.html?(?=&|$)/gi, '.htm');
       if (replaySrc === src) return attribute;
       changed = true;
       return `${prefix}${quote}${replaySrc}${quote}`;
@@ -1035,18 +1037,26 @@ async function main() {
   const config = loadConfig(); // validates env + timezone before any network call
   if (process.env.REPAIR_ONEBALL_REPLAY_URLS === '1' || process.env.REPAIR_ONEBALL_REPLAY_URLS === 'true') {
     const token = await accessToken(config);
-    const posts = await listPosts(token, config.blogId);
-    const counts = await repairOneBallReplayUrls(token, config.blogId, posts);
-    console.log(JSON.stringify({ mode: 'repair-oneball-replay-urls', ...counts }));
-    if (counts.failed > 0) process.exitCode = 1;
+    const results = [];
+    for (const blogId of config.blogIds) {
+      const posts = await listPosts(token, blogId);
+      const counts = await repairOneBallReplayUrls(token, blogId, posts);
+      results.push({ blogId, ...counts });
+    }
+    console.log(JSON.stringify({ mode: 'repair-oneball-replay-urls', blogs: results }));
+    if (results.some(result => result.failed > 0)) process.exitCode = 1;
     return;
   }
   if (process.env.REPAIR_PLAYER_SLASHES === '1' || process.env.REPAIR_PLAYER_SLASHES === 'true') {
     const token = await accessToken(config);
-    const posts = await listPosts(token, config.blogId);
-    const counts = await repairMalformedPlayerUrls(token, config.blogId, posts);
-    console.log(JSON.stringify({ mode: 'repair-player-slashes', ...counts }));
-    if (counts.failed > 0) process.exitCode = 1;
+    const results = [];
+    for (const blogId of config.blogIds) {
+      const posts = await listPosts(token, blogId);
+      const counts = await repairMalformedPlayerUrls(token, blogId, posts);
+      results.push({ blogId, ...counts });
+    }
+    console.log(JSON.stringify({ mode: 'repair-player-slashes', blogs: results }));
+    if (results.some(result => result.failed > 0)) process.exitCode = 1;
     return;
   }
   const allEvents = await attachExternalSources(await fetchDashboardEvents());
@@ -1065,15 +1075,19 @@ async function main() {
   }
 
   const token = await accessToken(config);
-  const posts = await listPosts(token, config.blogId);
-  const byMarker = new Map();
-  for (const post of posts) for (const label of post.labels || []) if (label.startsWith('s803:event:')) byMarker.set(label, post);
+  const results = [];
+  for (const blogId of config.blogIds) {
+    const posts = await listPosts(token, blogId);
+    const byMarker = new Map();
+    for (const post of posts) for (const label of post.labels || []) if (label.startsWith('s803:event:')) byMarker.set(label, post);
 
-  const counts = await processEvents(events, { token, blogId: config.blogId, byMarker, imgbbKey: config.imgbbKey });
+    const counts = await processEvents(events, { token, blogId, byMarker, imgbbKey: config.imgbbKey });
+    results.push({ blogId, ...counts });
+  }
   saveLogoCache();
-  console.log(JSON.stringify({ detected: events.length, created: counts.created, updated: counts.updated, skipped: counts.skipped, failed: counts.failed }));
+  console.log(JSON.stringify({ detected: events.length, blogs: results }));
   // The run finished every event; still exit non-zero so CI shows partial failures.
-  if (counts.failed > 0) process.exitCode = 1;
+  if (results.some(result => result.failed > 0)) process.exitCode = 1;
 }
 
 export {

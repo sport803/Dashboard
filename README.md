@@ -48,7 +48,7 @@ Add these under **Settings → Secrets and variables → Actions → New reposit
 
 | Secret | Value |
 |---|---|
-| `BLOGGER_BLOG_ID` | Numeric Blogger blog ID |
+| `BLOGGER_BLOG_IDS` | Comma-separated numeric Blogger blog IDs to autopost to (for example `123456789,987654321`). The legacy single-blog secret `BLOGGER_BLOG_ID` is still supported. |
 | `BLOGGER_GOOGLE_CLIENT_ID` | OAuth client ID for the Blogger API |
 | `BLOGGER_GOOGLE_CLIENT_SECRET` | OAuth client secret |
 | `BLOGGER_REFRESH_TOKEN` | OAuth refresh token with Blogger scope |
@@ -71,7 +71,7 @@ epl,f1,motogp,nascar,wrc,imsa,porsche-carrera-cup
 
 Use the Dashboard league IDs where possible, including `uecl` for UEFA Conference League. The worker also recognizes league names and aliases such as Formula 1, MotoGP, NASCAR, WRC, IMSA, Porsche Carrera Cup, and UEFA Conference League. This setting is independent of the Dashboard browser's local `activeLeagues` setting, because browser localStorage is not available inside GitHub Actions.
 
-The refresh token is required because GitHub Actions does not have a browser session. Do not commit it to the repository or place it in `index.html`.
+The refresh token is required because GitHub Actions does not have a browser session. Its Google account must have permission to publish to every listed blog. Do not commit the token to the repository or place it in `index.html`.
 
 ### Running it
 

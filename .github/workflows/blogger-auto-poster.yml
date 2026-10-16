@@ -29,7 +29,7 @@ on:
         default: 'false'
         type: boolean
       repair_oneball_replay_urls:
-        description: 'Change OneBall live iframe URLs to replay URLs on all auto-poster event posts'
+        description: 'Migrate OneBall iframe URLs to .htm replay URLs on all auto-poster event posts'
         required: false
         default: 'false'
         type: boolean
@@ -54,13 +54,13 @@ jobs:
       - name: Check Blogger credentials
         id: credentials
         env:
-          BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
+          BLOG_IDS: ${{ secrets.BLOGGER_BLOG_IDS || secrets.BLOGGER_BLOG_ID }}
           GOOGLE_CLIENT_ID: ${{ secrets.BLOGGER_GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.BLOGGER_GOOGLE_CLIENT_SECRET }}
           BLOGGER_REFRESH_TOKEN: ${{ secrets.BLOGGER_REFRESH_TOKEN }}
           IMGBB_API_KEY: ${{ secrets.IMGBB_API_KEY }}
         run: |
-          if [ -n "$BLOG_ID" ] && [ -n "$GOOGLE_CLIENT_ID" ] && [ -n "$GOOGLE_CLIENT_SECRET" ] && [ -n "$BLOGGER_REFRESH_TOKEN" ] && [ -n "$IMGBB_API_KEY" ]; then
+          if [ -n "$BLOG_IDS" ] && [ -n "$GOOGLE_CLIENT_ID" ] && [ -n "$GOOGLE_CLIENT_SECRET" ] && [ -n "$BLOGGER_REFRESH_TOKEN" ] && [ -n "$IMGBB_API_KEY" ]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
@@ -90,7 +90,7 @@ jobs:
       - name: Run Blogger event publisher
         if: steps.credentials.outputs.ready == 'true'
         env:
-          BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
+          BLOGGER_BLOG_IDS: ${{ secrets.BLOGGER_BLOG_IDS || secrets.BLOGGER_BLOG_ID }}
           GOOGLE_CLIENT_ID: ${{ secrets.BLOGGER_GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.BLOGGER_GOOGLE_CLIENT_SECRET }}
           BLOGGER_REFRESH_TOKEN: ${{ secrets.BLOGGER_REFRESH_TOKEN }}
