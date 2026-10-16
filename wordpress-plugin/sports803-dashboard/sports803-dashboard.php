@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Sports 803 Dashboard & Autopilot
  * Description: Professional Sports 803 event dashboard and native WordPress autopilot for live events, scores, thumbnails and verified replays.
- * Version: 2.2.0
+ * Version: 2.2.1
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Author: Sports 803
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('S803_PLUGIN_VERSION', '2.2.0');
+define('S803_PLUGIN_VERSION', '2.2.1');
 define('S803_PLUGIN_FILE', __FILE__);
 define('S803_PLUGIN_DIR', plugin_dir_path(__FILE__));
 

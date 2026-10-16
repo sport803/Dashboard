@@ -128,8 +128,21 @@ final class S803_Thumbnail_Generator {
         imagefilledellipse($image, $x + $w - $radius, $y + $radius, $h, $h, $color);
     }
 
-    private static function center_text($image, $text, $size, $center_x, $baseline, $font, $rgb, $max_width = 0) {
+    private static function gd_safe_text($text) {
         $text = trim(preg_replace('/\s+/', ' ', wp_strip_all_tags((string) $text)));
+        if ($text === '') { return ''; }
+        if (function_exists('iconv')) {
+            $ascii = @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $text);
+            if (is_string($ascii)) { $text = ($ascii === '' ? '?' : $ascii); }
+        }
+        // FreeType builds may reject otherwise valid UTF-8 characters during charset conversion.
+        // Keep non-ASCII bytes away from both imagettfbbox() and imagettftext().
+        $text = preg_replace('/[^\x20-\x7E]/', ' ', $text);
+        return trim(preg_replace('/\s+/', ' ', $text));
+    }
+
+    private static function center_text($image, $text, $size, $center_x, $baseline, $font, $rgb, $max_width = 0) {
+        $text = self::gd_safe_text($text);
         if ($text === '') { return; }
         $size = max(13, (int) $size);
         if ($max_width > 0) {
