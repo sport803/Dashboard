@@ -1,100 +1,27 @@
 # Sports 803 Dashboard
 
-## GitHub Actions Blogger auto-poster
+This repository contains the Sports 803 event dashboard and an installable WordPress plugin. The plugin creates and manages **native WordPress posts** for fixtures; WordPress is the publishing destination.
 
-The repository includes an unattended worker at `scripts/blogger-auto-poster.mjs` and the scheduled workflow `.github/workflows/blogger-auto-poster.yml`.
+## WordPress plugin
 
-Every five minutes, the workflow:
+The plugin package lives at `wordpress-plugin/sports803-dashboard/`. It provides:
 
-1. Queries the same ESPN scoreboard endpoints and league catalog used by the Dashboard UI (not Firebase).
-2. Keeps all non-cancelled events scheduled today; an external stream/player URL is optional because Dashboard event cards are valid before stream enrichment.
-3. Creates one **LIVE** Blogger post per event.
-4. Uses a stable `s803:event:<hash>` label to prevent duplicate posts.
-5. After the event is final, updates that same post with a highlights/replay article and result.
-6. Resolves the matching OneBall live page and adds it to the Sports 803 player URL using the `one=` parameter. PPVtv event links are not scraped or added.
-7. Generates a Dashboard-style logo-based thumbnail, renders it as PNG, and uploads it to ImgBB.
+- ESPN fixture discovery within a configurable date window and supported-league catalog;
+- one WordPress post per fixture, with kickoff rescheduling and Draft handling for postponed/cancelled events;
+- optional ESPN summary polling for LIVE score/clock and FULL TIME updates;
+- an extensible replay-provider interface with OneBall verification and same-post player embeds;
+- retry, stale-job recovery, Needs review state, activity logging, and a public native WordPress event listing shortcode.
 
-Normal events with a valid scheduled start time dated **today or tomorrow** are eligible. ESPN fetches the previous day, today, and tomorrow, then keeps today and tomorrow for normal leagues. Racing events retain the selected date plus-or-minus-one-day window so multi-day weekends are not missed. Older unrelated events are still ignored. The default date comparison uses `Africa/Nairobi`; set the optional repository variable `EVENT_TIMEZONE` under **Settings → Secrets and variables → Actions → Variables** when another timezone should define the posting window.
-
-For a live match, the publisher matches OneBall and Xoilac listings by team names. When both links are found, the generated iframe carries both sources, for example `https://www.sport803.online/p/player.html?one=https://oneball.live/live/<match-id>.html&xoilac=https://xoilaczzz.pro/truc-tiep/<match-slug>/`. If only one source is found, that source remains usable on its own. For a replay/highlights post, the OneBall path changes from `live` to `replay` while the matched Xoilac page is retained. The Xoilac homepage fetch is best-effort and restricted to match pages on `xoilaczzz.pro`.
-
-Player URLs are normalized before generation and comparison, so the Action uses `player.html?` and never `player.html//?`. To repair existing Blogger posts from the earlier malformed format, run **Actions → Blogger event auto-poster → Run workflow** and enable the `repair_player_slashes` input. That mode scans existing posts, updates only affected iframe bodies, and does not create new posts.
-
-To migrate all historical auto-poster event posts from a OneBall live iframe to the replay page, run the same workflow and enable `repair_oneball_replay_urls`. It scans posts with the `s803:event:` marker and updates only a Sports 803 player iframe whose `one=` source points to `oneball.live/live/`; it does not create posts or change other iframe sources.
-
-The publisher uses bounded HTTP timeouts and retries for transient feed, logo, ImgBB, OAuth, and Blogger failures. It caches successful team-logo lookups between runs, validates its environment before making network calls, limits Blogger labels to 20, and marks posts only after a thumbnail upload succeeds. Existing posts without the thumbnail marker are automatically revisited and repaired; when a thumbnail upload fails, the existing post is left untouched and the run reports the failure for a later retry.
-
-### Racing event discovery
-
-The dashboard and Action now use a three-day window (target date ±1 day) and deduplicate events by ID. ESPN remains the primary source for normal leagues and supported Formula 1/IndyCar feeds. MotoGP, WRC, IMSA, NASCAR, and other unsupported racing slugs use TheSportsDB's Motorsport day feed, cached once per date per run. Race events from adjacent days are retained so multi-day weekends are visible on the selected date. Broken sources are reported in the dashboard source legend and in the Action log instead of silently becoming zero events.
-
-The workflow supports event data for all Dashboard leagues. The racing detection aliases include **MotoGP, NASCAR, WRC, IMSA, and Porsche Carrera Cup**.
-
-### Player-level article enrichment
-
-For soccer, basketball, and hockey matches, the Action and dashboard can enrich articles from the ESPN summary endpoint with verified starting players, scorers, minutes, cards, and substitutions. Empty or unavailable fields are omitted; racing events are intentionally skipped. ESPN is primary and TheSportsDB is a bounded fallback. The Action processes at most 80 events per run with concurrency 4 and no more than 20 TheSportsDB player-data calls. Set the Actions variable `ENRICH_PLAYER_DATA=0` to disable enrichment during a rate-limit emergency; dry runs can use `ENRICH_PLAYER_DATA=1` to print per-event enrichment status.
-
-### SuperSport highlights fallback
-
-Completed match highlights try the existing OneBall source first. If OneBall has no usable replay, the dashboard and Action can query SuperSport's sport video listing and parse its Next.js payload for a verified YouTube embed or HLS source. Raw upstream URLs are never embedded directly: YouTube is wrapped with the Sports 803 player using `?embed=`, and HLS uses `?mora=`. Results are cached for six hours and the Action can disable this source with `SUPERSPORT_HIGHLIGHTS=0`.
-
-### Deferred media and article enrichment
-
-Missing OneBall, SuperSport, PPV, or other iframe sources never block an event or highlights article from being posted. The article is marked as pending in the dashboard log when no player is available. Later scheduled runs retry source discovery and update the existing Blogger post when a player URL appears. They also update existing articles when verified ESPN/TheSportsDB lineups, scorers, cards, substitutions, danger men, or team-news data becomes available.
-
-### Required GitHub repository secrets
-
-Add these under **Settings → Secrets and variables → Actions → New repository secret**:
-
-| Secret | Value |
-|---|---|
-| `BLOGGER_BLOG_IDS` | Comma-separated numeric Blogger blog IDs to autopost to (for example `123456789,987654321`). The legacy single-blog secret `BLOGGER_BLOG_ID` is still supported. |
-| `BLOGGER_GOOGLE_CLIENT_ID` | OAuth client ID for the Blogger API |
-| `BLOGGER_GOOGLE_CLIENT_SECRET` | OAuth client secret |
-| `BLOGGER_REFRESH_TOKEN` | OAuth refresh token with Blogger scope |
-| `IMGBB_API_KEY` | ImgBB API key used to upload each generated event thumbnail |
-
-Optional Actions variable:
-
-| Variable | Purpose |
-|---|---|
-| `EVENT_TIMEZONE` | IANA timezone used for the ESPN date query and today/tomorrow filter; defaults to `Africa/Nairobi` |
-| `AUTO_POST_LEAGUES` | Comma-separated league IDs/names to publish; blank means all eligible leagues |
-| `BLOGGER_MAX_WRITES_PER_BLOG_PER_RUN` | Maximum number of Blogger post creations/updates per blog in one run; defaults to `10`. Remaining events resume on the next scheduled run. |
-
-### Choosing leagues
-
-Create or edit the repository variable `AUTO_POST_LEAGUES` under **Settings → Secrets and variables → Actions → Variables**. For example:
-
-```text
-epl,f1,motogp,nascar,wrc,imsa,porsche-carrera-cup
-```
-
-Use the Dashboard league IDs where possible, including `uecl` for UEFA Conference League. The worker also recognizes league names and aliases such as Formula 1, MotoGP, NASCAR, WRC, IMSA, Porsche Carrera Cup, and UEFA Conference League. This setting is independent of the Dashboard browser's local `activeLeagues` setting, because browser localStorage is not available inside GitHub Actions.
-
-The refresh token is required because GitHub Actions does not have a browser session. Its Google account must have permission to publish to every listed blog. Do not commit the token to the repository or place it in `index.html`.
-
-### Running it
-
-- The schedule runs every five minutes after the secrets are present.
-- Each run caps successful writes per blog (default `10`) and rechecks unposted events next time; Blogger rate-limit responses defer the remaining events rather than retrying the entire list until timeout.
-- Use **Actions → Blogger event auto-poster → Run workflow** for a manual run.
-- A run with no matching stream events safely makes no Blogger changes.
-
-The existing dashboard UI still supports interactive Google sign-in, manual posting, bulk posting, and its browser-tab scheduler. The GitHub Action is the unattended path.
-
-
-Optional Actions variable: `LIVETV_HIGHLIGHTS` enables the LiveTV.sx replay fallback; set it to `0` to disable it.
-
-
-## WordPress plugin port
-
-An installable plugin package is maintained under `wordpress-plugin/sports803-dashboard/`. It embeds the dashboard with `[sports803_dashboard]` and offers a separate WordPress admin page for Blogger credentials and an opt-in WP-Cron autopilot. The autopilot continues publishing to Blogger; it does not convert the destination to WordPress posts. See the plugin README for installation, settings, and feature-parity notes.
-
-Build an uploadable ZIP with:
+Build the installable archive and run the WordPress-specific checks:
 
 ```bash
-bash scripts/build-wordpress-plugin.sh
+bash scripts/test-wordpress-plugin.sh
 ```
 
-The plugin is **off by default**. WordPress Cron is traffic-triggered, so a hosting/server cron should request `wp-cron.php` every five minutes for reliable timing. Keep the GitHub Actions schedule active until the plugin is installed and verified; disable that schedule before enabling WordPress autopilot to avoid concurrent publishers. WordPress credentials must be entered in the plugin settings; GitHub Actions secrets are not automatically transferred.
+The output archive is `dist/sports803-dashboard.zip` (generated locally and ignored by Git). For installation and configuration, see [`wordpress-plugin/sports803-dashboard/README.md`](wordpress-plugin/sports803-dashboard/README.md).
+
+## Autopilot runtime
+
+Autopilot is disabled by default. After installing the plugin, enable it at **WordPress → Settings → Sports 803 Autopilot**. WordPress schedules checks every five minutes. WP-Cron is traffic-triggered, so use a hosting/server cron to request `wp-cron.php` every five minutes when dependable timing is required. The plugin requires no external publishing credentials or GitHub Actions secrets.
+
+The repository still contains the original static dashboard and legacy publisher source for reference; the WordPress plugin does not embed or invoke those Blogger publishing paths. The plugin's public shortcode is rendered from WordPress-managed event posts.

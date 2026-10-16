@@ -1,34 +1,28 @@
-# Sports 803 Dashboard & Blogger Autopilot (WordPress plugin)
+# Sports 803 WordPress Dashboard & Autopilot
 
-This plugin embeds the existing Dashboard and can run the multi-blog Blogger autoposter from WordPress Cron. **The publishing destination remains Blogger**; it does not create WordPress posts.
+A WordPress plugin that creates and manages **native WordPress posts** for sports events. No external publishing credentials are required.
 
 ## Install
 
-1. Zip the `sports803-dashboard` directory and upload it through **Plugins → Add New → Upload Plugin**, or install the ZIP artifact produced by the repository build.
-2. Activate **Sports 803 Dashboard & Blogger Autopilot**.
-3. Open **Settings → Sports 803 Autopilot** and enter the Blogger blog IDs and OAuth credentials. The plugin cannot read GitHub Actions secrets; re-enter the existing credentials in these protected WordPress settings. Secret fields are write-only in the UI: leave them blank to retain saved values.
-4. Keep **Autopilot** disabled while the GitHub schedule is still active. For cutover, disable the GitHub Actions schedule first, save the Blogger settings, and then enable WordPress Autopilot.
-5. Add `[sports803_dashboard]` to a WordPress page to embed the Dashboard. Use `[sports803_dashboard height="1100"]` to set a different iframe height.
+1. Build the uploadable archive from the repository root: `bash scripts/build-wordpress-plugin.sh`.
+2. In WordPress, open **Plugins → Add New Plugin → Upload Plugin**, upload `dist/sports803-dashboard.zip`, and activate **Sports 803 Dashboard & Autopilot**.
+3. Open **Settings → Sports 803 Autopilot** and configure the date window, leagues, publication timing, live scores, and highlight settings.
+4. Enable **Autopilot** only when the settings are ready. It is off by default.
+5. Add `[sports803_dashboard]` to a public page for a native WordPress listing of managed upcoming/recent event posts. Limit the number of cards with `[sports803_dashboard limit="30"]`.
 
-The hosting account must allow installation of custom plugins and outbound HTTPS requests to ESPN, OneBall, Xoilac, Google OAuth/Blogger, and optionally ImgBB. The Google account behind the refresh token must be allowed to publish to every configured Blogger blog.
+Requires WordPress 6.0+ and PHP 7.4+. The server must allow outbound HTTPS to ESPN, TheSportsDB (racing fallback), and OneBall. No API secrets are required by the current providers.
 
-## Autopilot behavior
+## Autopilot engine
 
-- A custom WP-Cron event is scheduled every five minutes while Autopilot is enabled and credentials are configured.
-- WordPress Cron is traffic-triggered. For dependable five-minute timing on a quiet site, configure a hosting/server cron to request `wp-cron.php` every five minutes. If `DISABLE_WP_CRON` is enabled, this external cron is required.
-- The plugin discovers today/tomorrow ESPN events across its supported league catalog, with a TheSportsDB fallback for racing events; it matches live/replay sources from OneBall and Xoilac.
-- It posts immediately to Blogger, uses the same `s803:event:<FNV-1a marker>` labels as the repository worker to avoid duplicate posts, and updates the matching post when an event becomes final.
-- Each run writes at most 10 posts per Blogger blog by default. The limit is configurable from 1–25 in the plugin settings. Already-posted event markers are skipped, and remaining events are rechecked on the next run. Blogger 429 responses defer remaining events instead of retrying every event until timeout.
-- A transient lock prevents overlapping runs. The settings page shows the last per-blog created/updated/skipped/failed/deferred counts and provides a manual **Run autopilot now** action.
-- If the PHP GD extension and an ImgBB key are available, the plugin generates and uploads a simple Sports 803 thumbnail. Without them, posts can still be published without a thumbnail.
+- WordPress schedules the engine every five minutes while Autopilot is enabled. WP-Cron runs when the site receives requests, so configure a hosting/server cron to request `wp-cron.php` every five minutes for reliable timing on low-traffic sites. If `DISABLE_WP_CRON` is set, that external cron is required.
+- The event discovery window is configurable from 1–14 local calendar days. Supported leagues can be selected by comma-separated ID/name; a blank filter means all supported leagues. To bound each request, discovery rotates through the configured number of leagues on successive five-minute checks.
+- A stable league/event key ensures each fixture maps to one existing WordPress post. If kickoff changes, the same scheduled post is rescheduled. If ESPN reports a fixture postponed or cancelled, an existing managed post is moved to Draft; if the fixture returns to the schedule, that same post is restored.
+- New posts can be scheduled for kickoff (default) or published immediately. Existing published posts remain published when a later kickoff adjustment arrives.
+- With score synchronization enabled, eligible managed match posts are checked through ESPN event-summary endpoints. The engine updates one LIVE score/clock banner and replaces it with a FULL TIME result when the event ends.
+- Finished matches are queued for highlight discovery when automatic highlights are enabled. Providers implement a common interface; OneBall is the configured provider. The plugin uses the OneBall match ID retained from the fixture feed when available, verifies a replay page over HTTPS, then adds the player embed to the **same WordPress post**.
+- Highlight searches use exponential retry delays. Stale `processing` jobs are recovered; jobs that reach the configured attempt limit are marked **Needs review**. Administrators can retry them from the settings page.
+- A transient prevents overlapping runs. The settings page shows run counts, job counters, recent activity, and per-post highlight errors. The activity log is capped at 200 entries.
 
-## Current parity boundary
+## Operational note
 
-This initial WordPress port covers ESPN event discovery, multi-blog Blogger OAuth/posting, markers, final-status updates, batching, OneBall/Xoilac stream matching, and optional thumbnails. The richer Node worker's player-level lineup enrichment, SuperSport/LiveTV replay fallback, and its detailed highlight/article enrichment have not yet been ported. The embedded dashboard UI is the current `index.html` copied into the plugin asset; rebuild/copy it when the repository dashboard changes.
-
-## Security and operations
-
-- Do not commit OAuth client secrets, Blogger refresh tokens, or ImgBB keys.
-- Only WordPress administrators can view/edit settings or invoke a manual run.
-- Autopilot is off by default. Disable the GitHub schedule before turning on WordPress autopilot; both publishers use the same marker for idempotency, but simultaneous runs can still race.
-- Requires WordPress 6.0+ and PHP 7.4+. Image uploads additionally require PHP GD and the optional ImgBB key.
+This package owns the autopost lifecycle in WordPress; it does not rely on GitHub Actions for event publishing. Install and enable the plugin on the target WordPress site to start its five-minute checks. WP-Cron must be configured on that site for scheduled checks and scheduled post publication.
