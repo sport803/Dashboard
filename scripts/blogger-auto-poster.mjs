@@ -966,10 +966,24 @@ async function needsUpdate(existing, { event, final, desiredPlayer }, ctx) {
 
 function forceUpdateEnabled() { return /^(1|true|yes)$/i.test(text(process.env.FORCE_UPDATE)); }
 
+function maxWritesPerBlogPerRun(value = process.env.BLOGGER_MAX_WRITES_PER_BLOG_PER_RUN) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 10;
+}
+
 async function processEvents(events, ctx) {
   const { token, blogId, byMarker, imgbbKey, sleepFn = sleep } = ctx;
-  const counts = { created: 0, updated: 0, skipped: 0, failed: 0 };
+  const writeLimit = maxWritesPerBlogPerRun(ctx.writeLimit);
+  const renderThumbnail = ctx.renderThumbnail || thumbnailSvg;
+  const uploadThumbnail = ctx.uploadThumbnail || uploadImgBb;
+  const writePost = ctx.writePost || bloggerWrite;
+  const counts = { created: 0, updated: 0, skipped: 0, failed: 0, deferred: 0 };
   for (let index = 0; index < events.length; index++) {
+    if (counts.created + counts.updated >= writeLimit) {
+      counts.deferred += events.length - index;
+      console.log(`[Blogger] ${blogId}: batch limit ${writeLimit} reached; deferring ${counts.deferred} event(s) to the next run`);
+      break;
+    }
     const event = events[index];
     let key = '', title = '', existing = null;
     try {
@@ -998,7 +1012,7 @@ async function processEvents(events, ctx) {
       const article = final ? highlightsHtml(event, streams) : previewHtml(event, streams);
       let thumbHtml = '', thumbUploaded = false;
       try {
-        const thumbUrl = await uploadImgBb(await thumbnailSvg(event, title, final), imgbbKey);
+        const thumbUrl = await uploadThumbnail(await renderThumbnail(event, title, final), imgbbKey);
         if (thumbUrl) { thumbHtml = `<div><img src="${htmlEscape(thumbUrl)}" style="max-width:100%;height:auto;border-radius:10px;margin-bottom:18px" alt="${htmlEscape(title)}"></div>\n`; thumbUploaded = true; }
       } catch (error) { console.warn(`[ImgBB] ${title}: ${error.message}`); }
       if (existing && !thumbUploaded) {
@@ -1012,12 +1026,12 @@ async function processEvents(events, ctx) {
       const payload = { kind: 'blogger#post', blog: { id: blogId }, title, content: thumbHtml + article, labels: labelsFor(event, key, final, MAX_LABELS, thumbUploaded), searchDescription: `${eventName(event)} ${final ? 'highlights and replay' : 'live stream'} on Sports 803`.slice(0, 150) };
       let post, action;
       if (!existing) {
-        post = await bloggerWrite(token, blogId, null, payload);
+        post = await writePost(token, blogId, null, payload);
         counts.created++; action = 'created';
       } else {
         payload.id = existing.id;
         if (existing.published) payload.published = existing.published;
-        post = await bloggerWrite(token, blogId, existing.id, payload);
+        post = await writePost(token, blogId, existing.id, payload);
         counts.updated++; action = 'updated';
       }
       byMarker.set(marker, post);
@@ -1025,6 +1039,12 @@ async function processEvents(events, ctx) {
       logEvent({ key, action, postId: post.id, title, hlSource: replayFallback?.source || '' });
       await sleepFn(500 + Math.random() * 300);
     } catch (error) {
+      if (error?.status === 429 || /rateLimitExceeded/i.test(error?.message || '')) {
+        counts.deferred += events.length - index;
+        console.warn(`[Blogger] ${blogId}: write quota reached; deferring ${counts.deferred} event(s) to the next scheduled run`);
+        logEvent({ key, action: 'deferred', postId: existing?.id || '', title, reason: 'blogger-rate-limit' });
+        break;
+      }
       counts.failed++;
       console.error(`failed ${key} "${title}": ${error.message}`);
       logEvent({ key, action: 'failed', postId: existing?.id || '', title, error: error.message });
@@ -1086,7 +1106,7 @@ async function main() {
   }
   saveLogoCache();
   console.log(JSON.stringify({ detected: events.length, blogs: results }));
-  // The run finished every event; still exit non-zero so CI shows partial failures.
+  // Real event errors fail the job; deferred items are intentionally retried by the next scheduled run.
   if (results.some(result => result.failed > 0)) process.exitCode = 1;
 }
 
@@ -1098,7 +1118,7 @@ export {
   attachExternalSources, buildFeedIndex, parseXoilacLinks, replayLinks, eventKey, markerFor, labelsFor, playerUrlFor,
   dashboardSections, raceSections, previewSections, highlightsSections, playerDataSections, playerIframe, contentHasPlayer, hasEscapedPlayerQuerySeparator, supersportSportFor, fetchSuperSportPage, extractSuperSportVideo, findSuperSportHighlight, findLiveTVHighlight, parseLiveTVArchive, extractLiveTVIframe,
   teamLogoUrl, saveLogoCache, resetLogoCache, logoMarkup, thumbnailSvg, rasterizeThumbnail, uploadImgBb,
-  accessToken, listPosts, getPostBody, getPostForRepair, repairMalformedPlayerUrls, rewriteOneBallReplayIframes, repairOneBallReplayUrls, bloggerWrite, processEvents, needsUpdate, forceUpdateEnabled, parseDashboardEvent, hydrateEventPlayerData, enrichEventsWithPlayerData, fetchLeague, fetchDashboardEvents, fetchRacingFromTSDB, leagueFetchStatus, leagueFetchSource, normalizePlayerBase, normalizePlayerUrlsInHtml
+  accessToken, listPosts, getPostBody, getPostForRepair, repairMalformedPlayerUrls, rewriteOneBallReplayIframes, repairOneBallReplayUrls, bloggerWrite, processEvents, needsUpdate, forceUpdateEnabled, maxWritesPerBlogPerRun, parseDashboardEvent, hydrateEventPlayerData, enrichEventsWithPlayerData, fetchLeague, fetchDashboardEvents, fetchRacingFromTSDB, leagueFetchStatus, leagueFetchSource, normalizePlayerBase, normalizePlayerUrlsInHtml
 };
 
 const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
