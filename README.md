@@ -1,27 +1,28 @@
 # Sports 803 Dashboard
 
-This repository contains the Sports 803 event dashboard and an installable WordPress plugin. The plugin creates and manages **native WordPress posts** for fixtures; WordPress is the publishing destination.
+The repository contains the original Sports 803 dashboard sources and an installable **WordPress-native publishing plugin**. WordPress is the post destination; the plugin owns fixture discovery, post lifecycle, scores and verified highlights without Blogger credentials or scheduled GitHub Actions.
 
 ## WordPress plugin
 
-The plugin package lives at `wordpress-plugin/sports803-dashboard/`. It provides:
+Package source: `wordpress-plugin/sports803-dashboard/`.
 
-- ESPN fixture discovery within a configurable date window and supported-league catalog;
-- one WordPress post per fixture, with kickoff rescheduling and Draft handling for postponed/cancelled events;
-- optional ESPN summary polling for LIVE score/clock and FULL TIME updates;
-- an extensible replay-provider interface with OneBall verification and same-post player embeds;
-- retry, stale-job recovery, Needs review state, activity logging, and a public native WordPress event listing shortcode.
+The plugin creates native WordPress event posts with the Dashboard-style preview/highlight templates, stable event markers and sport/league/team tags, featured match graphics, ESPN score summaries, event rescheduling, draft handling for cancelled/postponed fixtures, and retryable verified-replay jobs. It matches ESPN fixtures with OneBall and Xoilac live sources, uses LiveTV as a replay fallback, and builds player links on `https://sport803.github.io/player/`.
 
-Build the installable archive and run the WordPress-specific checks:
+It includes two dashboard surfaces:
+
+- a professional **Sports 803** WordPress admin control center for settings, run status, provider health, job counters, Needs review actions and activity logs;
+- a public, searchable matchday board through `[sports803_dashboard]`.
+
+Build the uploadable archive and run PHP, source-provider, thumbnail and ZIP checks:
 
 ```bash
 bash scripts/test-wordpress-plugin.sh
 ```
 
-The output archive is `dist/sports803-dashboard.zip` (generated locally and ignored by Git). For installation and configuration, see [`wordpress-plugin/sports803-dashboard/README.md`](wordpress-plugin/sports803-dashboard/README.md).
+The generated `dist/sports803-dashboard.zip` is ignored by Git. For installation, cron requirements and provider behavior, see [`wordpress-plugin/sports803-dashboard/README.md`](wordpress-plugin/sports803-dashboard/README.md).
 
-## Autopilot runtime
+## Runtime notes
 
-Autopilot is disabled by default. After installing the plugin, enable it at **WordPress → Settings → Sports 803 Autopilot**. WordPress schedules checks every five minutes. WP-Cron is traffic-triggered, so use a hosting/server cron to request `wp-cron.php` every five minutes when dependable timing is required. The plugin requires no external publishing credentials or GitHub Actions secrets.
+Autopilot is **off by default**. Install the ZIP on the target WordPress site, configure **Sports 803** and enable it there. WordPress checks every five minutes; standard WP-Cron is traffic-triggered, so a hosting/server cron requesting `wp-cron.php` every five minutes is recommended. Automatic featured thumbnails require PHP GD with FreeType.
 
-The repository still contains the original static dashboard and legacy publisher source for reference; the WordPress plugin does not embed or invoke those Blogger publishing paths. The plugin's public shortcode is rendered from WordPress-managed event posts.
+The plugin embeds the current Player app at `https://sport803.github.io/player/` and sends OneBall replay URLs using the `.htm` format. Player-side parsing supports both `one` and `xoilac` sources.

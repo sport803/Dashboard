@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: Sports 803 Dashboard & Autopilot
- * Description: Embeds the Sports 803 dashboard and manages native WordPress sports-event posts with scheduled autopilot.
- * Version: 2.0.0
+ * Description: Professional Sports 803 event dashboard and native WordPress autopilot for live events, scores, thumbnails and verified replays.
+ * Version: 2.2.0
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Author: Sports 803
@@ -14,11 +14,13 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('S803_PLUGIN_VERSION', '2.0.0');
+define('S803_PLUGIN_VERSION', '2.2.0');
 define('S803_PLUGIN_FILE', __FILE__);
 define('S803_PLUGIN_DIR', plugin_dir_path(__FILE__));
 
 require_once S803_PLUGIN_DIR . 'includes/class-s803-providers.php';
+require_once S803_PLUGIN_DIR . 'includes/class-s803-source-providers.php';
+require_once S803_PLUGIN_DIR . 'includes/class-s803-thumbnail.php';
 require_once S803_PLUGIN_DIR . 'includes/class-s803-engine.php';
 require_once S803_PLUGIN_DIR . 'includes/class-s803-admin.php';
 
@@ -40,6 +42,8 @@ final class S803_Dashboard_Plugin {
             'live_score_sync' => 1,
             'auto_highlights' => 1,
             'oneball_provider' => 1,
+            'xoilac_provider' => 1,
+            'livetv_provider' => 1,
             'max_highlight_attempts' => 5,
             'jobs_per_run' => 10,
         );
@@ -88,6 +92,8 @@ final class S803_Dashboard_Plugin {
             'live_score_sync' => !empty($input['live_score_sync']) ? 1 : 0,
             'auto_highlights' => !empty($input['auto_highlights']) ? 1 : 0,
             'oneball_provider' => !empty($input['oneball_provider']) ? 1 : 0,
+            'xoilac_provider' => !empty($input['xoilac_provider']) ? 1 : 0,
+            'livetv_provider' => !empty($input['livetv_provider']) ? 1 : 0,
             'max_highlight_attempts' => max(1, min(10, absint(isset($input['max_highlight_attempts']) ? $input['max_highlight_attempts'] : $old['max_highlight_attempts']))),
             'jobs_per_run' => max(1, min(50, absint(isset($input['jobs_per_run']) ? $input['jobs_per_run'] : $old['jobs_per_run']))),
         );
