@@ -5,6 +5,9 @@ import {
   eventDateWindow,
   fetchLeague,
   loadConfig,
+  HttpError,
+  maxWritesPerBlogPerRun,
+  processEvents,
   isEligibleForPosting,
   isTodayOrTomorrow,
   labelsFor,
@@ -40,6 +43,36 @@ test('Blogger config accepts multiple IDs and preserves the legacy single-ID sec
   assert.equal(multi.blogId, '12345');
   const legacy = loadConfig({ DRY_RUN: '1', BLOGGER_BLOG_ID: '24680' });
   assert.deepEqual(legacy.blogIds, ['24680']);
+});
+
+test('Blogger write batches defer remaining events after the per-blog cap', async () => {
+  assert.equal(maxWritesPerBlogPerRun('3'), 3);
+  assert.equal(maxWritesPerBlogPerRun('0'), 10);
+  const events = [0, 1, 2].map(index => ({ ...matchEvent, id: `batch-${index}`, status: 'Scheduled' }));
+  let writes = 0;
+  const counts = await processEvents(events, {
+    token: 'test-token', blogId: 'blog-1', byMarker: new Map(), imgbbKey: 'test-key', writeLimit: 1,
+    renderThumbnail: async () => '<svg></svg>',
+    uploadThumbnail: async () => 'https://images.example/thumb.png',
+    writePost: async (_token, _blogId, _postId, payload) => ({ id: `post-${++writes}`, labels: payload.labels }),
+    sleepFn: async () => {}
+  });
+  assert.deepEqual(counts, { created: 1, updated: 0, skipped: 0, failed: 0, deferred: 2 });
+  assert.equal(writes, 1);
+});
+
+test('Blogger rate limits defer the current and remaining events for a later run', async () => {
+  const events = [0, 1, 2].map(index => ({ ...matchEvent, id: `limited-${index}`, status: 'Scheduled' }));
+  let writes = 0;
+  const counts = await processEvents(events, {
+    token: 'test-token', blogId: 'blog-1', byMarker: new Map(), imgbbKey: 'test-key', writeLimit: 10,
+    renderThumbnail: async () => '<svg></svg>',
+    uploadThumbnail: async () => 'https://images.example/thumb.png',
+    writePost: async () => { writes++; throw new HttpError('Blogger write failed (429): rateLimitExceeded', { status: 429 }); },
+    sleepFn: async () => {}
+  });
+  assert.deepEqual(counts, { created: 0, updated: 0, skipped: 0, failed: 0, deferred: 3 });
+  assert.equal(writes, 1);
 });
 
 test('the standard posting window includes local today and tomorrow across a year boundary', () => {

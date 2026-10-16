@@ -95,6 +95,7 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.BLOGGER_GOOGLE_CLIENT_SECRET }}
           BLOGGER_REFRESH_TOKEN: ${{ secrets.BLOGGER_REFRESH_TOKEN }}
           IMGBB_API_KEY: ${{ secrets.IMGBB_API_KEY }}
+          BLOGGER_MAX_WRITES_PER_BLOG_PER_RUN: ${{ vars.BLOGGER_MAX_WRITES_PER_BLOG_PER_RUN }}
           EVENT_TIMEZONE: ${{ vars.EVENT_TIMEZONE }}
           AUTO_POST_LEAGUES: ${{ inputs.league_filter || vars.AUTO_POST_LEAGUES }}
           EVENT_DATE: ${{ steps.run-date.outputs.event_date }}

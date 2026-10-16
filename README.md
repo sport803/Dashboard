@@ -60,6 +60,7 @@ Optional Actions variable:
 |---|---|
 | `EVENT_TIMEZONE` | IANA timezone used for the ESPN date query and today/tomorrow filter; defaults to `Africa/Nairobi` |
 | `AUTO_POST_LEAGUES` | Comma-separated league IDs/names to publish; blank means all eligible leagues |
+| `BLOGGER_MAX_WRITES_PER_BLOG_PER_RUN` | Maximum number of Blogger post creations/updates per blog in one run; defaults to `10`. Remaining events resume on the next scheduled run. |
 
 ### Choosing leagues
 
@@ -76,6 +77,7 @@ The refresh token is required because GitHub Actions does not have a browser ses
 ### Running it
 
 - The schedule runs every five minutes after the secrets are present.
+- Each run caps successful writes per blog (default `10`) and rechecks unposted events next time; Blogger rate-limit responses defer the remaining events rather than retrying the entire list until timeout.
 - Use **Actions → Blogger event auto-poster → Run workflow** for a manual run.
 - A run with no matching stream events safely makes no Blogger changes.
 
